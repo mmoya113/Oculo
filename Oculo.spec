@@ -1,7 +1,11 @@
 # Receta de PyInstaller: convierte el proyecto en Oculo.app.
 # Uso:  pyinstaller Oculo.spec --noconfirm
 import os
+import sys
 
+# PyInstaller no añade la carpeta del proyecto a la ruta de imports al leer
+# este archivo; SPECPATH es la carpeta donde está el .spec.
+sys.path.insert(0, SPECPATH)
 from oculo import __version__
 
 icon = "build/Oculo.icns" if os.path.exists("build/Oculo.icns") else None
