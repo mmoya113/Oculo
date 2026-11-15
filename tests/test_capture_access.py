@@ -57,7 +57,7 @@ def test_screen_capture_keeps_pixels_geometry_and_checks_revocation(monkeypatch)
     backend = Capture()
     monkeypatch.setitem(sys.modules, "mss", SimpleNamespace(mss=lambda:backend))
     source = ScreenSource()
-    frame = source.read(Settings(zone_width=200,zone_height=100,zone_offset_x=50))
+    frame = source.read(Settings(zone_width=200,zone_height=100,zone_offset_x=50,aim_limit_fov=True))
     assert frame.shape == (200,400,3)
     assert np.all(frame[:,:,1] == 123)
     assert source.geometry.crosshair == (-500,400)
@@ -68,3 +68,24 @@ def test_screen_capture_keeps_pixels_geometry_and_checks_revocation(monkeypatch)
         source.read(Settings())
     source.close()
     assert backend.closed
+
+
+def test_full_monitor_capture_ignores_saved_center_crop(monkeypatch):
+    monkeypatch.setattr(screen_access,"screen_capture_allowed",lambda **kw:True)
+    class Capture:
+        monitors=[{},dict(left=-1000,top=0,width=1000,height=800)]
+        region=None
+        def grab(self,region):
+            self.region=region
+            return np.zeros((region["height"],region["width"],4),np.uint8)
+        def close(self):
+            pass
+    backend=Capture()
+    monkeypatch.setitem(sys.modules,"mss",SimpleNamespace(mss=lambda:backend))
+    source=ScreenSource()
+    frame=source.read(Settings(zone_enabled=True,zone_width=200,zone_height=100,
+                               zone_offset_x=500,aim_limit_fov=False))
+    assert frame.shape==(800,1000,3)
+    assert backend.region==dict(left=-1000,top=0,width=1000,height=800)
+    assert source.geometry.local_crosshair==(500,400)
+    source.close()

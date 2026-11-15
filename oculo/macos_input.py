@@ -2,6 +2,7 @@
 from __future__ import annotations
 import ctypes as C
 import sys
+from pathlib import Path
 
 # Hardware keycodes (US physical positions); UI names make this explicit.
 KEYS = dict(zip("asdfhgzxcvbqwerty", [0,1,2,3,4,5,6,7,8,9,11,12,13,14,15,16]))
@@ -23,6 +24,7 @@ class QuartzInput:
             raise RuntimeError("El control del ratón requiere macOS.")
         self.cg = C.CDLL("/System/Library/Frameworks/CoreGraphics.framework/CoreGraphics")
         self.cf = C.CDLL("/System/Library/Frameworks/CoreFoundation.framework/CoreFoundation")
+        self.ax = C.CDLL("/System/Library/Frameworks/ApplicationServices.framework/ApplicationServices")
         def bind(lib, name, result, *args):
             f = getattr(lib, name)
             f.restype, f.argtypes = result, list(args)
@@ -30,6 +32,11 @@ class QuartzInput:
         for name in ("CGPreflightListenEventAccess", "CGRequestListenEventAccess",
                      "CGPreflightPostEventAccess", "CGRequestPostEventAccess"):
             bind(self.cg, name, C.c_bool)
+        bind(self.ax, "AXIsProcessTrusted", C.c_bool)
+        bind(self.ax, "AXIsProcessTrustedWithOptions", C.c_bool, C.c_void_p)
+        bind(self.cf, "CFDictionaryCreateMutable", C.c_void_p,
+             C.c_void_p, C.c_long, C.c_void_p, C.c_void_p)
+        bind(self.cf, "CFDictionarySetValue", None, C.c_void_p, C.c_void_p, C.c_void_p)
         bind(self.cg, "CGEventSourceCreate", C.c_void_p, C.c_int)
         bind(self.cg, "CGEventSourceButtonState", C.c_bool, C.c_int, C.c_uint32)
         bind(self.cg, "CGEventSourceKeyState", C.c_bool, C.c_int, C.c_uint16)
@@ -42,7 +49,9 @@ class QuartzInput:
         bind(self.cf, "CFRelease", None, C.c_void_p)
 
     def permissions(self):
-        return {"posting": bool(self.cg.CGPreflightPostEventAccess()),
+        # Accessibility trust is the grant shown in System Settings. The Quartz
+        # posting preflight is a separate diagnostic, not the Accessibility grant.
+        return {"posting": bool(self.ax.AXIsProcessTrusted()),
                 "listening": bool(self.cg.CGPreflightListenEventAccess())}
 
     def ready(self):
@@ -52,18 +61,49 @@ class QuartzInput:
         p = self.permissions()
         missing = []
         if not p["posting"]:
-            missing.append("Accesibilidad para mover el ratón")
+            missing.append("macOS no reconoce Accesibilidad para esta copia de Oculo. "
+                           "Si el interruptor ya está encendido, elimina la entrada antigua "
+                           "con − y vuelve a añadir la app que estás usando")
         if not p["listening"]:
-            missing.append("Monitorización de entrada para leer activación y parada")
-        return "Falta " + " y ".join(missing) if missing else "Permisos de ratón concedidos"
+            missing.append("macOS no reconoce Monitorización de entrada para leer activación y parada")
+        return ". ".join(missing) if missing else "Accesibilidad y entrada reconocidas por macOS"
 
     def request_permissions(self):
         p = self.permissions()
         if not p["posting"]:
-            self.cg.CGRequestPostEventAccess()
+            self._prompt_accessibility()
         if not p["listening"]:
             self.cg.CGRequestListenEventAccess()
         return self.permissions()
+
+    def _prompt_accessibility(self):
+        key_callbacks = C.addressof(C.c_byte.in_dll(self.cf, "kCFTypeDictionaryKeyCallBacks"))
+        value_callbacks = C.addressof(C.c_byte.in_dll(self.cf, "kCFTypeDictionaryValueCallBacks"))
+        options = self.cf.CFDictionaryCreateMutable(None, 0, key_callbacks, value_callbacks)
+        if not options:
+            raise RuntimeError("No se pudo solicitar Accesibilidad.")
+        try:
+            key = C.c_void_p.in_dll(self.ax, "kAXTrustedCheckOptionPrompt").value
+            true = C.c_void_p.in_dll(self.cf, "kCFBooleanTrue").value
+            self.cf.CFDictionarySetValue(options, key, true)
+            self.ax.AXIsProcessTrustedWithOptions(options)
+        finally:
+            self.cf.CFRelease(options)
+
+    def permission_report(self):
+        p = self.permissions()
+        preflight = bool(self.cg.CGPreflightPostEventAccess())
+        app = running_app_path()
+        report = (f'Accesibilidad: {"reconocida" if p["posting"] else "no reconocida para esta copia"} · '
+                  f'Entrada: {"reconocida" if p["listening"] else "no reconocida"}. '
+                  f'App en uso: {app}.')
+        if p["posting"] and not preflight:
+            report += " La comprobación de envío de Quartz difiere; usa la prueba del cursor para verificar el resultado real."
+        if not p["posting"]:
+            report += " Si ya está activada, elimina Oculo de la lista con − y añade exactamente esta copia, después ciérrala y ábrela."
+        if ".app" in app and not app.startswith("/Applications/"):
+            report += " Instálala y ábrela desde Aplicaciones antes de autorizarla."
+        return report
 
     def position(self):
         event = self.cg.CGEventCreate(None)
@@ -106,3 +146,11 @@ class QuartzInput:
                 self.cf.CFRelease(event)
         finally:
             self.cf.CFRelease(source)
+
+
+def running_app_path():
+    executable = Path(sys.executable).resolve()
+    for parent in executable.parents:
+        if parent.suffix == ".app":
+            return str(parent)
+    return str(executable)

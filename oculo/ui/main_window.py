@@ -79,10 +79,12 @@ class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.settings = Settings.load()
+        self.settings.aim_show_fov = False  # visual overlay always starts hidden
         self.worker: DetectionWorker | None = None
         self.desktop_overlay = DesktopOverlay()
         self._screen_bounds = None
         self._mouse_probe = None
+        self._show_permission_report = False
         self._binders: list = []          # funciones ajustes -> control
         self._last_table_update = 0.0
 
@@ -211,6 +213,9 @@ class MainWindow(QMainWindow):
         permissions = QPushButton("Autorizar control del ratón")
         permissions.clicked.connect(self._request_input_permissions)
         card.addWidget(permissions)
+        recheck = QPushButton("Recomprobar permisos y copia de Oculo")
+        recheck.clicked.connect(self._recheck_input_permissions)
+        card.addWidget(recheck)
         self.probe_button = QPushButton("Probar movimiento del ratón (3 s)")
         self.probe_button.setToolTip("Desactiva Aim y, tras 3 segundos, mueve el cursor 12 puntos a la derecha una sola vez. No necesita modelo ni detecciones. Suelta los botones y deja el ratón quieto, lejos del borde. F8 o tu parada configurada cancela la prueba.")
         self.probe_button.clicked.connect(self._start_mouse_probe)
@@ -232,7 +237,11 @@ class MainWindow(QMainWindow):
         hint.setWordWrap(True)
         card.addWidget(hint)
         card = self._card(column, "02  /  OBJETIVO")
-        self._slider(card, "Radio FOV (puntos macOS)", "aim_fov", 10, 800)
+        self._check(card, "Limitar búsqueda al círculo FOV", "aim_limit_fov")
+        self._slider(card, "Radio del círculo FOV (opcional)", "aim_fov", 10, 800)
+        hint = QLabel("Sin límite FOV, busca en todo el monitor seleccionado.", objectName="hint")
+        hint.setWordWrap(True)
+        card.addWidget(hint)
         self._check(card, "Mantener el mismo objetivo", "aim_sticky")
         self._slider(card, "Radio de asociación", "aim_match_radius", 10, 250)
         self._slider(card, "Retención al perderlo (ms)", "aim_lost_ms", 0, 500)
@@ -310,6 +319,9 @@ class MainWindow(QMainWindow):
 
         # ---------------- ZONA ----------------
         card = self._card(column, "ZONA DE DETECCIÓN")
+        hint = QLabel("Pantalla sin límite FOV: se captura todo el monitor; este recorte se usa con límite FOV, vídeo o webcam.", objectName="hint")
+        hint.setWordWrap(True)
+        card.addWidget(hint)
         self._check(card, "Analizar solo una zona centrada", "zone_enabled")
         self._slider(card, "Ancho", "zone_width", 128, 2560, suffix=" px", step=32)
         self._slider(card, "Alto", "zone_height", 128, 1600, suffix=" px", step=32)
@@ -696,6 +708,7 @@ class MainWindow(QMainWindow):
         self._refresh_capture_access()
 
     def start(self) -> None:
+        self._show_permission_report = False
         if self.settings.source == "screen" and not screen_capture_allowed(request=True):
             self.capture_banner.show()
             self.viewer.clear_image("Captura bloqueada por macOS. Revisa el aviso de permisos.")
@@ -730,12 +743,20 @@ class MainWindow(QMainWindow):
         self.aim_status.setText("AIM  /  Configuración inicial cargada · habilita Aim cuando estés listo")
 
     def _request_input_permissions(self) -> None:
+        self._show_permission_report = True
         try:
             from ..macos_input import QuartzInput
             backend = QuartzInput()
             backend.request_permissions()
-            self.aim_details.setText(backend.permission_message() +
-                ". Si acabas de concederlos, cierra y vuelve a abrir Oculo desde Aplicaciones.")
+            self.aim_details.setText(backend.permission_report())
+        except Exception as exc:
+            self.aim_details.setText(str(exc))
+
+    def _recheck_input_permissions(self) -> None:
+        self._show_permission_report = True
+        try:
+            from ..macos_input import QuartzInput
+            self.aim_details.setText(QuartzInput().permission_report())
         except Exception as exc:
             self.aim_details.setText(str(exc))
 
@@ -744,7 +765,7 @@ class MainWindow(QMainWindow):
             from ..macos_input import QuartzInput
             backend = QuartzInput()
             if not backend.ready():
-                self.aim_details.setText(backend.permission_message())
+                self.aim_details.setText(backend.permission_report())
                 return
             self.settings.aim_enabled = False
             self._sync_controls()
@@ -779,12 +800,12 @@ class MainWindow(QMainWindow):
     def _refresh_aim_status(self) -> None:
         if self.worker:
             self.aim_status.setText("AIM  /  " + self.worker.aim.status)
-            if self._mouse_probe is None and self.settings.aim_enabled:
+            if self._mouse_probe is None and self.settings.aim_enabled and not self._show_permission_report:
                 d = self.worker.aim.diagnostics
                 age = "—" if d["age_ms"] is None else f'{d["age_ms"]:.0f} ms'
                 self.aim_details.setText(
                     f'Tecla: {"detectada" if d["activation"] else "sin pulsar"} · '
-                    f'Dentro del FOV: {d["in_fov"]} · Imagen: {age} · '
+                    f'Objetivos válidos: {d["in_fov"]} · Imagen: {age} · '
                     f'Descartadas por retraso: {d["stale"]} · Envíos al ratón: {d["posted"]}')
         self._sync_desktop_overlay()
 

@@ -98,6 +98,7 @@ class Settings:
     aim_activation: str = "mouse:right"
     aim_emergency: str = "key:f8"
     aim_mode: str = "exponential"
+    aim_limit_fov: bool = False      # apagado = buscar en todo el monitor
     aim_fov: float = 180.0            # radio desde la mira real del monitor
     aim_sticky: bool = True
     aim_match_radius: float = 80.0
@@ -113,7 +114,7 @@ class Settings:
     aim_gain_x: float = 1.0           # calibración entrada -> desplazamiento visual
     aim_gain_y: float = 1.0
     aim_stale_ms: int = 200
-    aim_show_fov: bool = True
+    aim_show_fov: bool = False
 
     # --- Visor ---
     box_color: str = "#8B7CFF"

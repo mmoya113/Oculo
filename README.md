@@ -105,7 +105,7 @@ Para **añadir una opción nueva**: añade un campo a `Settings`, crea su contro
 
 Tres fuentes con el mismo contrato: `read(settings)` devuelve una imagen BGR de NumPy, o `None`.
 
-- `ScreenSource` usa `mss` y captura **solo la zona de detección**, no la pantalla entera. Capturar 640×640 es mucho más rápido que una pantalla Retina completa.
+- `ScreenSource` usa `mss` y captura todo el monitor por defecto. Si activas el límite FOV, puedes usar la zona recortada para reducir el coste de captura. Vídeo y webcam conservan sus controles de recorte.
 - `VideoSource` y `CameraSource` usan `cv2.VideoCapture` y recortan la zona después de leer.
 - `zone_rect()` calcula el rectángulo centrado y lo mantiene dentro de la imagen.
 
@@ -198,7 +198,7 @@ La interfaz separa **Aim**, **Detección** y **Visor / datos**, con estado del c
 
 ### Selección y movimiento
 
-Se elige el punto de la caja más cercano a la mira dentro del FOV circular. El punto vertical va de 0 (arriba) a 1 (abajo). El seguimiento sticky asocia por clase, distancia y solape; conserva identidad durante el plazo de retención, **sin mover cuando no hay detección**. Dos objetos de la misma clase que se cruzan pueden intercambiar identidad: no hay un modelo de reidentificación.
+Se elige el punto de la caja más cercano a la mira. Por defecto se consideran todas las detecciones del monitor; el FOV circular solo restringe la selección si activas explícitamente su límite. El punto vertical va de 0 (arriba) a 1 (abajo). El seguimiento sticky asocia por clase, distancia y solape; conserva identidad durante el plazo de retención, **sin mover cuando no hay detección**. Dos objetos de la misma clase que se cruzan pueden intercambiar identidad: no hay un modelo de reidentificación.
 
 Cada imagen produce como máximo un paso relativo, sin colas de trayectorias ni posiciones absolutas del objetivo. Para dt (máximo 1/30 s), tau = respuesta en segundos y t = min(1, dt/tau):
 
@@ -238,7 +238,7 @@ Validación manual pendiente en el equipo del usuario: conceder el permiso al DM
 
 En la pestaña **Aim**, cada opción tiene un **?** con una explicación al pasar el ratón. Los ajustes de calibración/latencia están ocultos bajo «Mostrar ajustes avanzados» para empezar con menos controles.
 
-Pulsa **Cargar configuración inicial** para aplicar Exponential, respuesta 180 ms, EMA 0,65, FOV 180 puntos, zona muerta 2, paso máximo 8, velocidad 400, predicción 0 y caducidad 200 ms. Conserva tu modelo, fuente, detección, colores y registro. Deja Aim desactivado para que tú lo habilites cuando estés listo. Es una base conservadora para probar, no una garantía de compatibilidad o calibración de tu juego. Los ajustes ya guardados no se reemplazan automáticamente al actualizar.
+Pulsa **Cargar configuración inicial** para aplicar Exponential, respuesta 180 ms, EMA 0,65, sin límite de FOV, círculo oculto, zona muerta 2, paso máximo 8, velocidad 400, predicción 0 y caducidad 200 ms. Conserva tu modelo, fuente, detección, colores y registro. Deja Aim desactivado para que tú lo habilites cuando estés listo. Es una base conservadora para probar, no una garantía de compatibilidad o calibración de tu juego. Los ajustes ya guardados no se reemplazan automáticamente al actualizar.
 
 ### Si hay cajas pero el ratón no se mueve
 
@@ -252,3 +252,22 @@ En el escritorio el cursor puede moverse sin que la caja detectada cambie de pos
 
 Referencias: [estado de eventos de sesión de Apple](https://developer.apple.com/documentation/coregraphics/cgeventsourcestateid), [deltas enteros de ratón](https://developer.apple.com/documentation/coregraphics/cgeventfield/mouseeventdeltax), [solicitud de acceso a entrada](https://developer.apple.com/documentation/coregraphics/cgrequestlisteneventaccess()).
 
+
+
+## 1.0.3: pantalla completa sin límite FOV y Accesibilidad de la copia actual
+
+- **Sin límite por defecto:** se consideran todas las detecciones válidas del monitor seleccionado. La captura de pantalla usa el monitor completo aunque un preset antiguo guardase un recorte 640×640. «Limitar búsqueda al círculo FOV» permite volver al límite/recorte de forma explícita. Las fuentes vídeo/webcam mantienen su recorte.
+- **Círculo oculto al arrancar:** el FOV visual y la mira opcional empiezan ocultos incluso si antes se guardaron visibles. Mostrar el círculo no activa ningún límite. Aim mantiene su activación por tecla/botón y su parada de emergencia.
+- **Comprobación correcta:** el permiso de Accesibilidad se consulta con `AXIsProcessTrusted` y se solicita con `AXIsProcessTrustedWithOptions` y la opción de mostrar el aviso nativo. El preflight de publicación de Quartz se conserva como diagnóstico separado: un resultado diferente no se presenta como si el interruptor de Accesibilidad estuviese apagado, ni bloquea por sí solo una copia reconocida por Accessibility. Monitorización de entrada sigue siendo necesaria para leer la activación/parada. La prueba del cursor verifica el resultado observado; consultar permisos no demuestra por sí solo que se haya movido.
+- **Recomprobar permisos y copia de Oculo:** muestra la ruta de la app que se está usando, el reconocimiento de Accesibilidad/entrada y si difiere la comprobación de Quartz. No cambia ni reinicia permisos del sistema. Permite distinguir la copia instalada de una ejecutada desde un DMG u otra carpeta.
+
+Si el interruptor de Oculo aparece encendido pero macOS no reconoce la copia actual:
+
+1. Instala la versión final en `/Applications/Oculo.app`, cierra todas las copias de Oculo con ⌘Q y abre la de Aplicaciones.
+2. En Privacidad y seguridad → Accesibilidad, **selecciona la entrada antigua de Oculo y elimínala con −**, en lugar de alternar repetidamente su interruptor.
+3. Pulsa **+** y añade exactamente `/Applications/Oculo.app`; actívala y vuelve a abrir Oculo.
+4. Usa «Recomprobar permisos y copia de Oculo» y «Probar movimiento del ratón (3 s)». Si el sistema indica que falta Monitorización de entrada, renueva también la entrada de esa misma copia allí.
+
+Las compilaciones actuales usan firma ad hoc. Su requisito de firma puede identificar el hash de cada ejecutable; reemplazar el build puede dejar una entrada visible asociada a una copia anterior. La app no puede concederse permisos, modificar la base de permisos ni garantizar que macOS conserve la autorización al actualizar. Una identidad Developer ID estable requiere un certificado del propietario, no incluido en este repositorio.
+
+Las pruebas adicionales cubren objetivos fuera del círculo con límite apagado, captura completa ignorando recortes antiguos, arranque con el círculo oculto y la discrepancia entre AX y el preflight de Quartz. El ensayo nativo construye la solicitud de Accesibilidad sin mostrar avisos ni conceder permisos, e intercepta los eventos antes de publicarlos.

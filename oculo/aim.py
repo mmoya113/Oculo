@@ -52,6 +52,12 @@ def options(s: Settings) -> dict:
     return {k: bounded(getattr(s, "aim_" + k), *v) for k, v in limits.items()}
 
 
+def eligible_targets(targets, crosshair, s):
+    p = options(s)
+    return [t for t in targets if t.valid() and (not s.aim_limit_fov or
+            math.dist(t.point(p["point_y"]), crosshair) <= p["fov"])]
+
+
 def overlap(a: Target, b: Target) -> float:
     area = max(0, min(a.x2, b.x2) - max(a.x1, b.x1)) * max(
         0, min(a.y2, b.y2) - max(a.y1, b.y1))
@@ -74,7 +80,7 @@ class AimEngine:
     def step(self, targets: list[Target], crosshair: tuple[float, float],
              now: float, s: Settings) -> tuple[float, float]:
         p = options(s)
-        signature = tuple(p.items()) + (s.aim_mode, s.aim_sticky)
+        signature = tuple(p.items()) + (s.aim_mode, s.aim_sticky, s.aim_limit_fov)
         if signature != self.signature:
             self.reset()
             self.signature = signature
@@ -92,8 +98,7 @@ class AimEngine:
         self.time = now
         point = lambda t: t.point(p["point_y"])
         distance = lambda a, b: math.hypot(a[0]-b[0], a[1]-b[1])
-        candidates = [t for t in targets if t.valid() and
-                      distance(point(t), crosshair) <= p["fov"]]
+        candidates = eligible_targets(targets, crosshair, s)
         selected = None
         continuing = False
         if s.aim_sticky and self.target is not None:

@@ -4,7 +4,7 @@ import math
 import threading
 import time
 
-from .aim import AimEngine, MotionAccumulator, options
+from .aim import AimEngine, MotionAccumulator, options, eligible_targets
 from .macos_input import BINDINGS
 
 
@@ -146,8 +146,7 @@ class AimRuntime:
             self._consumed = self._generation
             self._info["samples"] += 1
             self._info["detections"] = len(targets)
-            candidates = [t for t in targets if t.valid() and math.dist(
-                t.point(p["point_y"]), crosshair) <= p["fov"]]
+            candidates = eligible_targets(targets, crosshair, s)
             self._info["in_fov"] = len(candidates)
             if not 0 <= age <= p["stale_ms"]/1000:
                 self._reset()

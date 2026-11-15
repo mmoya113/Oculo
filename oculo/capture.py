@@ -72,7 +72,11 @@ class ScreenSource(FrameSource):
 
     def read(self, s: Settings) -> np.ndarray | None:
         require_screen_capture()  # also catches a permission revoked while running
-        x, y, w, h = zone_rect(self._mon["width"], self._mon["height"], s)
+        # Full-monitor aim must not retain the old hidden 640x640 crop.
+        if s.aim_limit_fov:
+            x, y, w, h = zone_rect(self._mon["width"], self._mon["height"], s)
+        else:
+            x, y, w, h = 0, 0, self._mon["width"], self._mon["height"]
         region = {
             "left": self._mon["left"] + x,
             "top": self._mon["top"] + y,

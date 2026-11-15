@@ -60,7 +60,7 @@ def test_stale_reason_survives_120hz_polls_and_reports_age():
 @pytest.mark.parametrize("targets,stage", [([],"no_detection"),([box(500)],"outside_fov"),
                                           ([box(0)],"deadzone"),([box(60)],"posting")])
 def test_runtime_reasons_distinguish_detector_fov_deadzone_and_post(targets,stage):
-    r,b,s,t = setup_runtime()
+    r,b,s,t = setup_runtime(aim_limit_fov=True)
     r.submit(targets,(0,0),t[0],"screen")
     r.tick()
     assert r.diagnostics["stage"] == stage
@@ -152,7 +152,11 @@ import ctypes as C
 from oculo.macos_input import QuartzInput, Point
 b=QuartzInput()
 assert set(b.permissions()) == {"posting","listening"}
-b.ready=lambda:True
+b.ax.AXIsProcessTrusted=lambda:True
+b.cg.CGPreflightPostEventAccess=lambda:False
+b.cg.CGPreflightListenEventAccess=lambda:True
+assert b.ready()
+assert "difiere" in b.permission_report()
 b.pressed=lambda binding:False
 b.position=lambda:(100.,200.)
 b.cg.CGEventGetIntegerValueField.argtypes=[C.c_void_p,C.c_uint32]
@@ -177,8 +181,10 @@ def test_permissions_request_post_and_listen_separately_and_use_session_state():
     requests=[]
     polled=[]
     b=QuartzInput.__new__(QuartzInput)
+    b.ax=SimpleNamespace(AXIsProcessTrusted=lambda:flags["posting"])
+    b._prompt_accessibility=lambda:requests.append("accessibility")
     b.cg=SimpleNamespace(
-        CGPreflightPostEventAccess=lambda:flags["posting"],
+        CGPreflightPostEventAccess=lambda:False,
         CGPreflightListenEventAccess=lambda:flags["listening"],
         CGRequestPostEventAccess=lambda:requests.append("posting"),
         CGRequestListenEventAccess=lambda:requests.append("listening"),
@@ -188,10 +194,65 @@ def test_permissions_request_post_and_listen_separately_and_use_session_state():
     assert "Accesibilidad" in b.permission_message()
     assert "Monitorización" in b.permission_message()
     assert not all(b.request_permissions().values())  # requesting is not consent
-    assert requests == ["posting","listening"]
+    assert requests == ["accessibility","listening"]
     flags["posting"]=True
     assert "Accesibilidad" not in b.permission_message()
     flags["listening"]=True
     assert b.ready()
     assert b.pressed("key:a") and b.pressed("mouse:right")
     assert polled == [(0,0),(0,1)]
+
+
+def test_full_monitor_mode_selects_detections_far_outside_hidden_circle():
+    from oculo.aim import AimEngine
+    s=Settings(aim_limit_fov=False,aim_fov=10,aim_show_fov=False)
+    e=AimEngine()
+    dx,dy=e.step([box(900)],(0,0),1,s)
+    assert dx > 0 and dy == 0
+    assert e.target.point(.5) == (900,0)
+    s.aim_limit_fov=True
+    assert e.step([box(900)],(0,0),1.02,s) == (0,0)
+
+
+def test_runtime_full_monitor_diagnostics_do_not_apply_radius_filter():
+    r,b,s,t=setup_runtime(aim_fov=10,aim_limit_fov=False)
+    r.submit([box(900)],(0,0),t[0],"screen")
+    r.tick()
+    assert r.diagnostics["stage"] == "posting"
+    assert r.diagnostics["in_fov"] == 1
+    assert b.moves
+
+
+def test_quartz_preflight_alone_does_not_override_denied_accessibility():
+    from types import SimpleNamespace
+    from oculo.macos_input import QuartzInput
+    b=QuartzInput.__new__(QuartzInput)
+    b.ax=SimpleNamespace(AXIsProcessTrusted=lambda:False)
+    b.cg=SimpleNamespace(CGPreflightPostEventAccess=lambda:True,
+                         CGPreflightListenEventAccess=lambda:True)
+    assert not b.ready()
+    assert "esta copia" in b.permission_message()
+
+
+def test_native_accessibility_request_builds_prompt_options_without_prompting():
+    if sys.platform != "darwin":
+        pytest.skip("AppKit is macOS only")
+    script = """
+import ctypes as C
+from oculo.macos_input import QuartzInput
+b=QuartzInput()
+b.cf.CFDictionaryGetValue.argtypes=[C.c_void_p,C.c_void_p]
+b.cf.CFDictionaryGetValue.restype=C.c_void_p
+seen=[]
+def capture(options):
+    key=C.c_void_p.in_dll(b.ax,"kAXTrustedCheckOptionPrompt").value
+    true=C.c_void_p.in_dll(b.cf,"kCFBooleanTrue").value
+    assert b.cf.CFDictionaryGetValue(options,key)==true
+    seen.append(True)
+    return False
+b.ax.AXIsProcessTrustedWithOptions=capture
+b._prompt_accessibility()
+assert seen==[True]
+"""
+    result=subprocess.run([sys.executable,"-c",script],capture_output=True,text=True)
+    assert result.returncode == 0,result.stderr

@@ -43,5 +43,5 @@ class MovementProbe:
         if abs(dx-12) <= 3 and abs(dy) <= 3:
             return "Prueba correcta · macOS movió el cursor. Activa Aim para probar la detección."
         if math.hypot(dx,dy) < 1:
-            return "No se observó movimiento · revisa Accesibilidad y coloca el cursor lejos del borde"
+            return "No se observó movimiento · coloca el cursor lejos del borde; si Accesibilidad ya está activada, elimina la entrada antigua con − y vuelve a añadir la app instalada"
         return "Prueba no concluyente · deja el ratón quieto y repite"

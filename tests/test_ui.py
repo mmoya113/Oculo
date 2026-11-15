@@ -147,3 +147,15 @@ def test_stop_cancels_pending_mouse_probe(monkeypatch):
     assert not window._probe_timer.isActive()
     assert window.probe_button.isEnabled()
     window.close()
+
+
+def test_saved_overlay_always_starts_hidden_and_fov_limit_defaults_off(monkeypatch):
+    app=QApplication.instance() or QApplication([])
+    monkeypatch.setattr(Settings,"load",classmethod(lambda cls:cls(aim_show_fov=True)))
+    monkeypatch.setattr(Settings,"save",lambda self:None)
+    monkeypatch.setattr("oculo.ui.main_window.screen_capture_allowed",lambda **kw:True)
+    window=MainWindow()
+    assert window.settings.aim_show_fov is False
+    assert window.settings.aim_limit_fov is False
+    assert not window.desktop_overlay.isVisible()
+    window.close()
