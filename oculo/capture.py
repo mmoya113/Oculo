@@ -15,6 +15,7 @@ import cv2
 import numpy as np
 
 from .config import Settings
+from .aim import ScreenGeometry
 
 
 def zone_rect(frame_w: int, frame_h: int, s: Settings) -> tuple[int, int, int, int]:
@@ -60,6 +61,7 @@ class ScreenSource(FrameSource):
     def __init__(self, monitor: int = 1):
         import mss  # se importa aquí para que los tests no lo necesiten
 
+        self.geometry = None
         self._sct = mss.mss()
         # monitors[0] es "todas las pantallas juntas"; las reales empiezan en 1.
         index = monitor if 0 < monitor < len(self._sct.monitors) else 1
@@ -75,7 +77,13 @@ class ScreenSource(FrameSource):
         }
         shot = self._sct.grab(region)
         # mss entrega BGRA (4 canales). Quitamos el canal alfa -> BGR.
-        return np.ascontiguousarray(np.asarray(shot)[:, :, :3])
+        frame = np.ascontiguousarray(np.asarray(shot)[:, :, :3])
+        self.geometry = ScreenGeometry(
+            region["left"], region["top"], w, h, frame.shape[1], frame.shape[0],
+            self._mon["left"] + self._mon["width"]/2,
+            self._mon["top"] + self._mon["height"]/2,
+        )
+        return frame
 
     def close(self) -> None:
         self._sct.close()

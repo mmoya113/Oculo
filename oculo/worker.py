@@ -22,6 +22,7 @@ from PySide6.QtCore import QThread, Signal
 from PySide6.QtGui import QImage
 
 from . import capture, overlay
+from .aim_runtime import AimRuntime
 from .config import Settings, logs_dir, models_dir
 from .datalog import DataLogger
 from .inference import Detector
@@ -38,16 +39,21 @@ class DetectionWorker(QThread):
         self._settings = settings.copy()
         self._lock = threading.Lock()
         self._running = False
+        self._stop_requested = threading.Event()
+        self.aim = AimRuntime(settings)
 
     # ------------------------------------------------------------------
     def update_settings(self, settings: Settings) -> None:
         """Llamado desde la interfaz cada vez que cambia un control."""
         with self._lock:
             self._settings = settings.copy()
+        self.aim.configure(settings)
 
     def stop(self) -> None:
+        self._stop_requested.set()
+        self.aim.close()
         self._running = False
-        self.wait(3000)
+        self.wait()
 
     def _snapshot(self) -> Settings:
         with self._lock:
@@ -56,6 +62,7 @@ class DetectionWorker(QThread):
     # ------------------------------------------------------------------
     def run(self) -> None:  # noqa: C901 - es el bucle principal, se lee de arriba abajo
         self._running = True
+        self.aim.start()
         source = None
         source_key = None        # qué fuente hay abierta ahora mismo
         detector = None
@@ -66,7 +73,7 @@ class DetectionWorker(QThread):
         last_time = time.perf_counter()
 
         try:
-            while self._running:
+            while not self._stop_requested.is_set():
                 s = self._snapshot()
                 loop_start = time.perf_counter()
 
@@ -95,6 +102,8 @@ class DetectionWorker(QThread):
                     time.sleep(0.2)      # esperar a que el usuario arregle la fuente
                     continue
 
+                # Timestamp before capture: inference latency counts toward freshness.
+                captured_at = time.monotonic()
                 # 3) Capturar una imagen.
                 frame = source.read(s)
                 if frame is None:
@@ -111,6 +120,11 @@ class DetectionWorker(QThread):
                         frame, s.confidence, s.iou, s.max_detections, s.classes
                     )
                     infer_ms = (time.perf_counter() - t0) * 1000
+
+                geometry = getattr(source, "geometry", None)
+                if geometry is not None:
+                    self.aim.submit(geometry.targets(detections), geometry.crosshair,
+                                    captured_at, (source_key, s.model, geometry), s)
 
                 # 5) Log en CSV: se abre al activar la opción y se cierra al quitarla.
                 if s.log_enabled and logger is None:
@@ -131,8 +145,9 @@ class DetectionWorker(QThread):
 
                 # 7) Dibujar y enviar a la interfaz.
                 text = f"{fps:.0f} FPS  ·  {infer_ms:.1f} ms  ·  {len(detections)} det."
-                self.frame_ready.emit(overlay.render(frame, detections, s, text), detections)
+                self.frame_ready.emit(overlay.render(frame, detections, s, text, geometry), detections)
                 self.stats.emit({
+                    "aim": self.aim.status,
                     "fps": fps,
                     "infer_ms": infer_ms,
                     "count": len(detections),
@@ -149,7 +164,10 @@ class DetectionWorker(QThread):
                     spent = time.perf_counter() - loop_start
                     if spent < budget:
                         time.sleep(budget - spent)
+        except Exception as exc:
+            self.error.emit(str(exc))
         finally:
+            self.aim.close()
             # Pase lo que pase, liberar la fuente y cerrar el CSV.
             if source:
                 source.close()

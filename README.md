@@ -2,7 +2,7 @@
 
 App de escritorio para **macOS** que hace **detección de objetos en tiempo real** con modelos YOLO en formato ONNX. Captura la pantalla, un vídeo o la webcam, pasa cada imagen por el modelo y muestra las cajas, las estadísticas y los datos numéricos de cada detección.
 
-Oculo **solo observa**: captura, detecta, dibuja y registra. No envía ningún evento de ratón ni de teclado, y no dibuja nada encima de otras ventanas.
+Oculo captura, detecta, dibuja y registra. El **Aim assist opcional**, desactivado por defecto, envía movimientos relativos de ratón solo con la fuente Pantalla y mientras mantienes la activación. El visor sigue dentro de la aplicación.
 
 ## Qué hace
 
@@ -90,7 +90,7 @@ git push origin v1.0.0
                                             ui/main_window.py (controles)
 ```
 
-Hay dos hilos. El **hilo principal** lleva la interfaz; el **worker** hace el trabajo pesado. Se comunican así:
+Hay tres hilos: la entrada se comprueba aparte a 120 Hz para que una inferencia lenta no impida la parada global. El **hilo principal** lleva la interfaz; el **worker** hace el trabajo pesado. Se comunican así:
 
 - Interfaz → worker: una copia del objeto `Settings`, protegida con un candado.
 - Worker → interfaz: señales de Qt (`frame_ready`, `stats`, `error`, `model_loaded`).
@@ -183,3 +183,41 @@ Oculo no es un port de Aimmy. Comparte la parte de visión y deja fuera, a prop�
 - Un mapa de calor con las posiciones de las detecciones de un vídeo entero.
 - Seguimiento de objetos entre imágenes (asignar un ID a cada caja con IoU).
 - Entrenar un modelo propio con Ultralytics y tus propias imágenes.
+
+
+## Aim assist y nueva interfaz
+
+La interfaz separa **Aim**, **Detección** y **Visor / datos**, con estado del control siempre visible. En macOS, Qt 6.9+ expande el contenido bajo la barra de título transparente y conserva los controles nativos de cerrar, minimizar y pantalla completa. Se fuerza la apariencia oscura del sistema para evitar la franja blanca. El DMG actual requiere **macOS 14+ y Apple Silicon** (dependencias actuales de Qt/ONNX).
+
+1. Añade tu modelo ONNX y selecciona **Pantalla**, monitor y zona. La mira se considera en el centro del monitor seleccionado; usa el juego a pantalla completa, centrado. No se detecta automáticamente una ventana de juego ni su sensibilidad.
+2. En **Ajustes del Sistema → Privacidad y seguridad**, concede **Grabación de pantalla**, **Accesibilidad** y **Monitorización de entrada** a Oculo; reinícialo si macOS lo pide. Oculo muestra el permiso que falta sin intentar eludirlo.
+3. Pulsa **Iniciar**, habilita **Aim assist** y mantén **clic derecho**. Se pueden elegir otros botones o teclas físicas US. **F8** (posiblemente Fn+F8) detiene globalmente el Aim y queda bloqueado hasta deshabilitarlo y habilitarlo otra vez. **Parada Aim** funciona desde la cabecera. La parada no genera clics ni libera botones que tú mantienes.
+4. Empieza con Exponential, respuesta 160 ms, EMA 0.65, predicción 0, paso 12, velocidad 600 y ganancia 1. El FOV es un **radio en puntos macOS**, independiente de Retina; 180 puntos equivalen a 360 píxeles con escala 2x.
+5. Ajusta la ganancia visual X/Y: si un punto enviado desplaza el objetivo unos dos puntos en sentido contrario, usa ganancia 2. Un valor demasiado bajo puede provocar sobrecorrecciones con la sensibilidad del juego. Aumenta respuesta y reduce paso/velocidad si hay latencia.
+
+### Selección y movimiento
+
+Se elige el punto de la caja más cercano a la mira dentro del FOV circular. El punto vertical va de 0 (arriba) a 1 (abajo). El seguimiento sticky asocia por clase, distancia y solape; conserva identidad durante el plazo de retención, **sin mover cuando no hay detección**. Dos objetos de la misma clase que se cruzan pueden intercambiar identidad: no hay un modelo de reidentificación.
+
+Cada imagen produce como máximo un paso relativo, sin colas de trayectorias ni posiciones absolutas del objetivo. Para dt (máximo 1/30 s), tau = respuesta en segundos y t = min(1, dt/tau):
+
+- **Linear:** fracción = t.
+- **Bezier:** fracción = 3t² − 2t³, curva cúbica con controles 0 y 1; se aplica al paso de realimentación, no a una trayectoria aleatoria.
+- **Exponential:** fracción = 1 − exp(−dt/tau).
+- **Adaptive:** fracción = 1 − exp(−dt/tau × (1 + 2 min(1, distancia/FOV))).
+
+La EMA del error usa alpha = 1 − (1 − peso)^(dt×60), se reinicia al invertir dirección y se limita al error observado. La predicción opcional usa la variación del error en pantalla / dt, con horizonte y desplazamiento máximos. El movimiento final se limita por eje al error actual menos zona muerta, se divide por la ganancia y se limita en longitud por paso máximo y velocidad×dt. Cambiar objetivo, modelo, monitor, recorte, ajustes o activación reinicia el historial. No se envían pasos de imágenes caducadas, repetidas o fuera de orden. Los presets antiguos siguen siendo compatibles.
+
+### Retina, GeForce NOW y límites de validación
+
+Las cajas de inferencia se convierten usando el tamaño real de la captura dividido por el tamaño lógico de la región; X e Y se convierten por separado y se conservan los orígenes negativos de monitores secundarios. La mira permanece en el centro **del monitor**, aunque el recorte esté desplazado. Se publican eventos Quartz con deltas relativos y destino relativo al cursor actual; no se coloca el cursor sobre coordenadas de las cajas.
+
+GeForce NOW y otros juegos pueden ignorar eventos Quartz, usar entrada raw/cursor bloqueado, sensibilidad no lineal o añadir retraso de red. No hay garantía de compatibilidad ni de ausencia de oscilación en un juego real: los límites matemáticos corresponden a la medición actual y a la ganancia configurada. Las cajas por sí solas no separan movimiento de cámara y objetivo; la predicción se deja en 0 por defecto. No se implementan bypasses de entrada o de protecciones del juego. Vídeo y webcam nunca controlan el ratón.
+
+Las pruebas usan un backend falso: convergencia de bucle cerrado, inversión de movimiento, límites, pérdida de objetivo, coordenadas Retina/monitores, presets, caducidad, permisos, activación y parada. La CI además prueba el arranque del .app empaquetado; la respuesta real de GeForce NOW necesita una prueba manual en tu equipo con permisos y modelo.
+
+### Descargar una compilación de una PR
+
+Abre la PR → **Checks** → **Build macOS** → **Details**. Cuando la ejecución esté verde, abre su resumen y baja **Artifacts → Oculo-dmg** (requiere sesión de GitHub). Descomprime el ZIP, abre `Oculo.dmg` y arrastra Oculo a Aplicaciones. Las compilaciones de PR no crean una Release; el workflow también se ejecuta al integrar en main y permite ejecución manual.
+
+Referencias de implementación: [área de título de Qt](https://www.qt.io/blog/expanded-client-areas-and-safe-areas-in-qt-6.9), [eventos de ratón Quartz](https://developer.apple.com/documentation/coregraphics/cgevent/init(mouseeventsource:mousetype:mousecursorposition:mousebutton:)), [captura macOS de MSS](https://github.com/BoboTiG/python-mss/blob/main/src/mss/darwin.py). El motor es una implementación original inspirada en las funciones solicitadas de Aimmy; no pretende ser un port literal de su algoritmo V2.

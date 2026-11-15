@@ -14,6 +14,7 @@ Cada control (deslizador, casilla, desplegable...) se crea con un método
 from __future__ import annotations
 
 import time
+import sys
 from pathlib import Path
 
 from PySide6.QtCore import QSize, Qt, QTimer, QUrl
@@ -22,12 +23,13 @@ from PySide6.QtWidgets import (
     QAbstractItemView, QCheckBox, QColorDialog, QComboBox, QFileDialog, QFrame,
     QGridLayout, QHBoxLayout, QHeaderView, QLabel, QLineEdit, QMainWindow,
     QPushButton, QScrollArea, QSizePolicy, QSlider, QSpinBox, QTableWidget,
-    QTableWidgetItem, QVBoxLayout, QWidget,
+    QTableWidgetItem, QVBoxLayout, QWidget, QTabWidget,
 )
 
 from .. import APP_NAME, __version__
 from ..config import Settings, list_models, logs_dir, models_dir
 from ..worker import DetectionWorker
+from ..macos_input import BINDINGS
 from . import theme
 from .branding import logo_pixmap
 
@@ -76,6 +78,9 @@ class MainWindow(QMainWindow):
         self._last_table_update = 0.0
 
         self.setWindowTitle(APP_NAME)
+        if sys.platform == "darwin":
+            self.setWindowFlags(self.windowFlags() | Qt.WindowType.ExpandedClientAreaHint |
+                                Qt.WindowType.NoTitleBarBackgroundHint)
         self.setWindowIcon(QIcon(logo_pixmap(256)))
         self.resize(1280, 800)
         self.setMinimumSize(1020, 640)
@@ -102,6 +107,10 @@ class MainWindow(QMainWindow):
         layout.addLayout(body, 1)
         self.setCentralWidget(root)
 
+        self._aim_timer = QTimer(self)
+        self._aim_timer.setInterval(100)
+        self._aim_timer.timeout.connect(self._refresh_aim_status)
+        self._aim_timer.start()
         self.refresh_models()
         self._sync_controls()
 
@@ -114,9 +123,9 @@ class MainWindow(QMainWindow):
     # ==================================================================
     def _build_header(self) -> QWidget:
         header = self.header = QWidget(objectName="header")
-        header.setFixedHeight(64)
+        header.setFixedHeight(96 if sys.platform == "darwin" else 76)
         row = QHBoxLayout(header)
-        row.setContentsMargins(20, 0, 20, 0)
+        row.setContentsMargins(20, 28 if sys.platform == "darwin" else 0, 20, 0)
         row.setSpacing(12)
 
         logo = QLabel()
@@ -129,7 +138,7 @@ class MainWindow(QMainWindow):
         titles.setSpacing(0)
         titles.addStretch()
         titles.addWidget(QLabel(APP_NAME.upper(), objectName="appName"))
-        titles.addWidget(QLabel(f"Detección en tiempo real · v{__version__}", objectName="appTag"))
+        titles.addWidget(QLabel(f"VISION & CONTROL  /  v{__version__}", objectName="appTag"))
         titles.addStretch()
         row.addLayout(titles)
         row.addStretch()
@@ -144,6 +153,9 @@ class MainWindow(QMainWindow):
             button.clicked.connect(slot)
             row.addWidget(button)
 
+        panic = QPushButton("Parada Aim", objectName="danger")
+        panic.clicked.connect(self.emergency_stop)
+        row.addWidget(panic)
         self.start_button = QPushButton("Iniciar", objectName="primary")
         self.start_button.setCursor(Qt.CursorShape.PointingHandCursor)
         self.start_button.clicked.connect(self.toggle_running)
@@ -152,9 +164,60 @@ class MainWindow(QMainWindow):
 
     def _build_sidebar(self) -> QWidget:
         body = QWidget(objectName="sidebarBody")
-        column = QVBoxLayout(body)
-        column.setContentsMargins(14, 14, 14, 14)
-        column.setSpacing(12)
+        outer = QVBoxLayout(body)
+        outer.setContentsMargins(12, 16, 12, 12)
+        outer.addWidget(QLabel("CENTRO DE CONTROL", objectName="sectionTitle"))
+        tabs = QTabWidget()
+        outer.addWidget(tabs)
+        def page(title):
+            widget = QWidget()
+            layout = QVBoxLayout(widget)
+            layout.setContentsMargins(0, 14, 0, 0)
+            layout.setSpacing(12)
+            tabs.addTab(widget, title)
+            return layout
+
+        column = page("Aim")
+        card = self._card(column, "01  /  ACTIVACIÓN")
+        self._check(card, "Habilitar Aim assist", "aim_enabled")
+        card.addWidget(QLabel("Mantener para activar", objectName="fieldLabel"))
+        self._combo(card, "aim_activation", [(b, b) for b in BINDINGS])
+        card.addWidget(QLabel("Parada global (requiere rearmar)", objectName="fieldLabel"))
+        self._combo(card, "aim_emergency", [(b, b) for b in BINDINGS])
+        hint = QLabel("Predeterminado: clic derecho · parada F8.\n"
+                      "Activa Accesibilidad y Monitorización de entrada en macOS. "
+                      "Teclas por posición física US; usa Fn si tu Mac lo requiere.", objectName="hint")
+        hint.setWordWrap(True)
+        card.addWidget(hint)
+        card = self._card(column, "02  /  OBJETIVO")
+        self._slider(card, "Radio FOV (puntos macOS)", "aim_fov", 10, 800)
+        self._check(card, "Mantener el mismo objetivo", "aim_sticky")
+        self._slider(card, "Radio de asociación", "aim_match_radius", 10, 250)
+        self._slider(card, "Retención al perderlo (ms)", "aim_lost_ms", 0, 500)
+        self._slider(card, "Punto vertical (0 arriba / 1 abajo)", "aim_point_y", 0, 100, scale=100)
+        self._check(card, "Mostrar FOV y mira en el visor", "aim_show_fov")
+        card = self._card(column, "03  /  MOVIMIENTO")
+        self._combo(card, "aim_mode", [(m, m.lower()) for m in
+                                     ("Linear", "Bezier", "Exponential", "Adaptive")])
+        self._slider(card, "Respuesta (ms; más = más lento)", "aim_response_ms", 20, 1000)
+        self._slider(card, "EMA (peso de imagen nueva)", "aim_ema", 1, 100, scale=100)
+        self._slider(card, "Zona muerta (puntos)", "aim_deadzone", 0, 150, scale=10)
+        self._slider(card, "Paso máximo (puntos)", "aim_max_step", 1, 50)
+        self._slider(card, "Velocidad máxima (puntos/s)", "aim_max_speed", 20, 1500)
+        card = self._card(column, "04  /  CALIBRACIÓN Y LATENCIA")
+        self._slider(card, "Ganancia visual X por punto enviado", "aim_gain_x", 5, 500, scale=100)
+        self._slider(card, "Ganancia visual Y por punto enviado", "aim_gain_y", 5, 500, scale=100)
+        self._slider(card, "Predicción (ms; 0 recomendado)", "aim_prediction_ms", 0, 100)
+        self._slider(card, "Límite de predicción (puntos)", "aim_prediction_limit", 0, 30)
+        self._slider(card, "Caducidad de imagen (ms)", "aim_stale_ms", 20, 500)
+        hint = QLabel("GeForce NOW puede ignorar eventos sintéticos o añadir latencia. "
+                      "Oculo no puede garantizar la respuesta del juego. Empieza con "
+                      "ganancia 1, predicción 0 y pasos pequeños. Vídeo y webcam "
+                      "solo analizan: nunca controlan el ratón.", objectName="hint")
+        hint.setWordWrap(True)
+        card.addWidget(hint)
+        column.addStretch()
+        column = page("Detección")
 
         # ---------------- MODELO ----------------
         card = self._card(column, "MODELO")
@@ -210,6 +273,8 @@ class MainWindow(QMainWindow):
             row.addWidget(button)
         card.addLayout(row)
 
+        column.addStretch()
+        column = page("Visor / datos")
         # ---------------- VISOR ----------------
         card = self._card(column, "VISOR")
         row = QHBoxLayout()
@@ -246,7 +311,7 @@ class MainWindow(QMainWindow):
         scroll = self.sidebar = QScrollArea(objectName="sidebar")
         scroll.setWidget(body)
         scroll.setWidgetResizable(True)
-        scroll.setFixedWidth(348)
+        scroll.setFixedWidth(370)
         scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         return scroll
 
@@ -275,6 +340,9 @@ class MainWindow(QMainWindow):
             chips.addWidget(chip, 1)
         column.addWidget(self.chips_row)
 
+        self.aim_status = QLabel("AIM  /  Desactivado", objectName="aimStatus")
+        self.aim_status.setWordWrap(True)
+        column.addWidget(self.aim_status)
         self.viewer = Viewer()
         column.addWidget(self.viewer, 1)
 
@@ -523,10 +591,28 @@ class MainWindow(QMainWindow):
         self.worker.stats.connect(self._on_stats)
         self.worker.error.connect(lambda message: self._set_status(message, error=True))
         self.worker.model_loaded.connect(self._on_model_loaded)
+        self.worker.finished.connect(self._worker_finished)
         self.worker.start()
         self._set_running(True)
         self._set_status("En marcha." if self.settings.model else
                          "En marcha sin modelo: solo se muestra la imagen.")
+
+    def _refresh_aim_status(self) -> None:
+        if self.worker:
+            self.aim_status.setText("AIM  /  " + self.worker.aim.status)
+
+    def emergency_stop(self) -> None:
+        if self.worker:
+            self.worker.aim.panic()
+        self.settings.aim_enabled = False
+        self._sync_controls()
+        self._changed()
+        self.aim_status.setText("AIM  /  PARADA · activa Aim para rearmar")
+
+    def _worker_finished(self) -> None:
+        if self.worker is not None and not self.worker.isRunning():
+            self.worker = None
+            self._set_running(False)
 
     def stop(self) -> None:
         if self.worker:
@@ -571,6 +657,7 @@ class MainWindow(QMainWindow):
                 self.table.setItem(row, col, item)
 
     def _on_stats(self, data: dict) -> None:
+        self.aim_status.setText("AIM  /  " + data.get("aim", "Desactivado"))
         self.stat_labels["fps"].setText(f"{data['fps']:.0f}")
         self.stat_labels["infer"].setText(f"{data['infer_ms']:.1f} ms")
         self.stat_labels["count"].setText(str(data["count"]))
