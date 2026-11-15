@@ -2,7 +2,7 @@
 
 App de escritorio para **macOS** que hace **detección de objetos en tiempo real** con modelos YOLO en formato ONNX. Captura la pantalla, un vídeo o la webcam, pasa cada imagen por el modelo y muestra las cajas, las estadísticas y los datos numéricos de cada detección.
 
-Oculo captura, detecta, dibuja y registra. El **Aim assist opcional**, desactivado por defecto, envía movimientos relativos de ratón solo con la fuente Pantalla y mientras mantienes la activación. El visor sigue dentro de la aplicación.
+Oculo captura, detecta, dibuja y registra. El **Aim assist opcional**, desactivado por defecto, envía movimientos relativos de ratón solo con la fuente Pantalla y mientras mantienes la activación. Las cajas se muestran en el visor; el FOV y la mira opcionales se superponen sobre el monitor elegido.
 
 ## Qué hace
 
@@ -24,7 +24,7 @@ Oculo captura, detecta, dibuja y registra. El **Aim assist opcional**, desactiva
    ```bash
    xattr -cr /Applications/Oculo.app
    ```
-4. Al usar la fuente **Pantalla**, macOS pedirá permiso de **Grabación de pantalla**. Concédelo y reinicia la app. Sin ese permiso solo se ve el fondo de escritorio.
+4. Al usar la fuente **Pantalla**, macOS pedirá permiso de **Grabación de pantalla**. Concédelo y reinicia la app. Si falta ese permiso, Oculo muestra un aviso y no inicia una captura limitada al escritorio. Si instalas una versión nueva y solo ves el fondo, desactiva y reactiva el permiso de Oculo, cierra la app y ábrela desde Aplicaciones.
 
 > El build es para Apple Silicon (arm64). Cada versión nueva cuenta como una app distinta para macOS, así que puede volver a pedirte el permiso de pantalla.
 
@@ -162,7 +162,7 @@ df.plot.scatter(x="cx", y="cy")     # dónde aparecen los objetos
 
 ## Comparación con Aimmy
 
-Oculo no es un port de Aimmy. Comparte la parte de visión y deja fuera, a propósito, todo lo que actúa sobre el juego.
+Oculo implementa un motor original de Aim assist inspirado en las funciones solicitadas de Aimmy.
 
 | | Aimmy | Oculo |
 |---|---|---|
@@ -172,10 +172,11 @@ Oculo no es un port de Aimmy. Comparte la parte de visión y deja fuera, a prop�
 | Confianza mínima | Sí | Sí, más IoU, máximo de detecciones y filtro de clases |
 | Zona de análisis | FOV centrado | Rectángulo con ancho, alto y desplazamiento |
 | Fuentes | Pantalla | Pantalla, vídeo y webcam |
-| Visualización | Overlay sobre el juego | Visor propio dentro de la app |
+| Visualización | Overlay sobre el juego | Visor de detecciones y FOV opcional sobre el escritorio |
 | Datos | — | Tabla en vivo y CSV |
 | Presets de configuración | Sí | Sí (JSON) |
-| Movimiento del ratón, suavizado, predicción, disparo automático | Sí | **No, y no se añadirá** |
+| Movimiento del ratón, suavizado, predicción | Sí | Sí, opcional con activación mantenida |
+| Disparo automático | Sí | No |
 
 ## Ideas para seguir aprendiendo
 
@@ -221,3 +222,13 @@ Las pruebas usan un backend falso: convergencia de bucle cerrado, inversión de 
 Abre la PR → **Checks** → **Build macOS** → **Details**. Cuando la ejecución esté verde, abre su resumen y baja **Artifacts → Oculo-dmg** (requiere sesión de GitHub). Descomprime el ZIP, abre `Oculo.dmg` y arrastra Oculo a Aplicaciones. Las compilaciones de PR no crean una Release; el workflow también se ejecuta al integrar en main y permite ejecución manual.
 
 Referencias de implementación: [área de título de Qt](https://www.qt.io/blog/expanded-client-areas-and-safe-areas-in-qt-6.9), [eventos de ratón Quartz](https://developer.apple.com/documentation/coregraphics/cgevent/init(mouseeventsource:mousetype:mousecursorposition:mousebutton:)), [captura macOS de MSS](https://github.com/BoboTiG/python-mss/blob/main/src/mss/darwin.py). El motor es una implementación original inspirada en las funciones solicitadas de Aimmy; no pretende ser un port literal de su algoritmo V2.
+
+
+## Correcciones 1.0.1: captura, arrastre y FOV de escritorio
+
+- **Mover la ventana:** arrastra una zona vacía de la cabecera o el nombre/logo de Oculo. Se conserva la barra oscura integrada y los controles nativos. Doble clic sobre la cabecera maximiza/restaura; los botones siguen funcionando.
+- **Captura de otras apps:** Oculo comprueba el permiso real con `CGPreflightScreenCaptureAccess` antes de abrir MSS y antes de cada captura. Si falta o se revoca, detiene la captura/control en vez de mostrar solo el fondo y la propia app. El aviso incluye un botón para solicitar acceso y otro para abrir los permisos de macOS. La app no puede concederse este permiso por sí sola.
+- **Después de reemplazar una versión:** instala en `/Applications/Oculo.app`, cierra la versión anterior y abre la nueva desde Aplicaciones. En Privacidad y seguridad → Grabación de pantalla (o Grabación de pantalla y audio del sistema), desactiva y reactiva Oculo si ya figuraba activado; después ciérralo y ábrelo otra vez. Si la entrada anterior sigue sin servir, elimínala con el botón menos de macOS y vuelve a añadir la app instalada. Los builds ad hoc sin certificado estable pueden necesitar renovar este permiso tras una actualización.
+- **FOV opcional:** la opción «Mostrar FOV y mira sobre otras apps» crea una ventana transparente independiente en el monitor capturado. Está centrada en el monitor, no en el recorte ni en el visor, no recibe foco/clics y usa `canJoinAllSpaces` + `fullScreenAuxiliary` para acompañar los escritorios y ventanas a pantalla completa. Se oculta al detener, desactivar Aim, usar vídeo/webcam, cerrar Oculo o activar la parada. No se dibuja dentro de la imagen del visor; con captura MSS/Quartz la ventana se marca no compartible para evitar recapturar el FOV. Las restricciones de algunas apps/pantallas protegidas pueden impedir superposiciones.
+
+Validación manual pendiente en el equipo del usuario: conceder el permiso al DMG instalado, colocar Chrome delante de la zona capturada y cambiar de escritorio con tres dedos. Las pruebas automáticas cubren denegación/revocación del permiso, fidelidad de píxeles y geometría, arrastre y botones, separación del FOV del visor y comportamiento pasivo de la superposición. La CI prueba además el arranque del .app empaquetado.

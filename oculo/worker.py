@@ -148,6 +148,7 @@ class DetectionWorker(QThread):
                 self.frame_ready.emit(overlay.render(frame, detections, s, text, geometry), detections)
                 self.stats.emit({
                     "aim": self.aim.status,
+                    "screen_bounds": getattr(source, "bounds", None),
                     "fps": fps,
                     "infer_ms": infer_ms,
                     "count": len(detections),

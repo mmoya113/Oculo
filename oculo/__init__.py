@@ -10,9 +10,8 @@ Mapa rápido de módulos (léelos en este orden para entender el flujo):
     worker.py     -> hilo que une todo: captura -> inferencia -> dibujo -> log
     ui/           -> la ventana, los controles y el tema visual
 
-Oculo solo OBSERVA: captura, detecta, dibuja y registra. No envía ningún
-evento de ratón ni de teclado al sistema.
+El control del ratón es opcional y requiere activación explícita y permisos.
 """
 
-__version__ = "1.0.0"
+__version__ = "1.0.1"
 APP_NAME = "Oculo"

@@ -122,3 +122,8 @@ QLabel#aimStatus {{ background: #122B2B; color: {ACCENT}; padding: 12px 16px;
 QPushButton#danger {{ color: {DANGER}; border-color: #633344; }}
 QToolTip {{ background: {CARD}; color: {TEXT}; border: 1px solid {BORDER}; }}
 """
+
+STYLESHEET += """
+QFrame#captureBanner { background: #30271B; border: 1px solid #75603B; border-radius: 10px; }
+QFrame#captureBanner QLabel { color: #F3D9A8; font-size: 12px; }
+"""

@@ -32,6 +32,10 @@ from ..worker import DetectionWorker
 from ..macos_input import BINDINGS
 from . import theme
 from .branding import logo_pixmap
+from .titlebar import DraggableHeader
+from ..screen_access import screen_capture_allowed, PERMISSION_HELP
+from .desktop_overlay import DesktopOverlay
+from ..aim import options
 
 
 class Viewer(QLabel):
@@ -74,6 +78,8 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.settings = Settings.load()
         self.worker: DetectionWorker | None = None
+        self.desktop_overlay = DesktopOverlay()
+        self._screen_bounds = None
         self._binders: list = []          # funciones ajustes -> control
         self._last_table_update = 0.0
 
@@ -111,6 +117,11 @@ class MainWindow(QMainWindow):
         self._aim_timer.setInterval(100)
         self._aim_timer.timeout.connect(self._refresh_aim_status)
         self._aim_timer.start()
+        self._capture_timer = QTimer(self)
+        self._capture_timer.setInterval(1000)
+        self._capture_timer.timeout.connect(self._refresh_capture_access)
+        self._capture_timer.start()
+        self._refresh_capture_access()
         self.refresh_models()
         self._sync_controls()
 
@@ -122,7 +133,7 @@ class MainWindow(QMainWindow):
     # Construcción de la interfaz
     # ==================================================================
     def _build_header(self) -> QWidget:
-        header = self.header = QWidget(objectName="header")
+        header = self.header = DraggableHeader(objectName="header")
         header.setFixedHeight(96 if sys.platform == "darwin" else 76)
         row = QHBoxLayout(header)
         row.setContentsMargins(20, 28 if sys.platform == "darwin" else 0, 20, 0)
@@ -132,6 +143,7 @@ class MainWindow(QMainWindow):
         pixmap = logo_pixmap(76)                      # x2 para pantallas Retina
         pixmap.setDevicePixelRatio(2)
         logo.setPixmap(pixmap)
+        logo.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
         row.addWidget(logo)
 
         titles = QVBoxLayout()
@@ -140,6 +152,10 @@ class MainWindow(QMainWindow):
         titles.addWidget(QLabel(APP_NAME.upper(), objectName="appName"))
         titles.addWidget(QLabel(f"VISION & CONTROL  /  v{__version__}", objectName="appTag"))
         titles.addStretch()
+        for i in range(titles.count()):
+            widget = titles.itemAt(i).widget()
+            if widget:
+                widget.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
         row.addLayout(titles)
         row.addStretch()
 
@@ -199,7 +215,7 @@ class MainWindow(QMainWindow):
         self._slider(card, "Radio de asociación", "aim_match_radius", 10, 250)
         self._slider(card, "Retención al perderlo (ms)", "aim_lost_ms", 0, 500)
         self._slider(card, "Punto vertical (0 arriba / 1 abajo)", "aim_point_y", 0, 100, scale=100)
-        self._check(card, "Mostrar FOV y mira en el visor", "aim_show_fov")
+        self._check(card, "Mostrar FOV y mira sobre otras apps", "aim_show_fov")
         card = self._card(column, "03  /  MOVIMIENTO")
         self._combo(card, "aim_mode", [(m, m.lower()) for m in
                                      ("Linear", "Bezier", "Exponential", "Adaptive")])
@@ -347,6 +363,20 @@ class MainWindow(QMainWindow):
         self.aim_status = QLabel("AIM  /  Desactivado", objectName="aimStatus")
         self.aim_status.setWordWrap(True)
         column.addWidget(self.aim_status)
+        self.capture_banner = QFrame(objectName="captureBanner")
+        notice = QVBoxLayout(self.capture_banner)
+        self.capture_help = QLabel(PERMISSION_HELP)
+        self.capture_help.setWordWrap(True)
+        notice.addWidget(self.capture_help)
+        actions = QHBoxLayout()
+        grant = QPushButton("Permitir captura de otras apps")
+        grant.clicked.connect(self._request_capture_access)
+        settings = QPushButton("Abrir permisos de macOS")
+        settings.clicked.connect(self._open_capture_settings)
+        actions.addWidget(grant)
+        actions.addWidget(settings)
+        notice.addLayout(actions)
+        column.addWidget(self.capture_banner)
         self.viewer = Viewer()
         column.addWidget(self.viewer, 1)
 
@@ -589,7 +619,32 @@ class MainWindow(QMainWindow):
         else:
             self.start()
 
+    def _refresh_capture_access(self) -> bool:
+        needed = self.settings.source == "screen" and not screen_capture_allowed()
+        self.capture_banner.setVisible(needed)
+        if needed and self.worker is not None:
+            # Stop before showing any wallpaper-only preview or making input.
+            self.stop()
+            self.viewer.clear_image("Captura bloqueada por macOS. Revisa el aviso de permisos.")
+            self._set_status("Falta permiso de grabación de pantalla.", error=True)
+        return needed
+
+    def _open_capture_settings(self) -> None:
+        QDesktopServices.openUrl(QUrl(
+            "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture"))
+
+    def _request_capture_access(self) -> None:
+        if not screen_capture_allowed(request=True):
+            self._open_capture_settings()
+        self._refresh_capture_access()
+
     def start(self) -> None:
+        if self.settings.source == "screen" and not screen_capture_allowed(request=True):
+            self.capture_banner.show()
+            self.viewer.clear_image("Captura bloqueada por macOS. Revisa el aviso de permisos.")
+            self._set_status("Activa la grabación de pantalla y vuelve a abrir Oculo.", error=True)
+            return
+        self.capture_banner.hide()
         self.worker = DetectionWorker(self.settings)
         self.worker.frame_ready.connect(self._on_frame)
         self.worker.stats.connect(self._on_stats)
@@ -601,9 +656,16 @@ class MainWindow(QMainWindow):
         self._set_status("En marcha." if self.settings.model else
                          "En marcha sin modelo: solo se muestra la imagen.")
 
+    def _sync_desktop_overlay(self) -> None:
+        visible = (self.worker is not None and self.settings.source == "screen"
+                   and self.settings.aim_enabled and self.settings.aim_show_fov
+                   and not self.worker.aim.status.startswith("PARADA"))
+        self.desktop_overlay.configure(self._screen_bounds, options(self.settings)["fov"], visible)
+
     def _refresh_aim_status(self) -> None:
         if self.worker:
             self.aim_status.setText("AIM  /  " + self.worker.aim.status)
+        self._sync_desktop_overlay()
 
     def emergency_stop(self) -> None:
         if self.worker:
@@ -614,11 +676,15 @@ class MainWindow(QMainWindow):
         self.aim_status.setText("AIM  /  PARADA · activa Aim para rearmar")
 
     def _worker_finished(self) -> None:
-        if self.worker is not None and not self.worker.isRunning():
+        if self.sender() is self.worker and self.worker is not None and not self.worker.isRunning():
             self.worker = None
             self._set_running(False)
+            self.desktop_overlay.hide()
+            self._screen_bounds = None
 
     def stop(self) -> None:
+        self.desktop_overlay.hide()
+        self._screen_bounds = None
         if self.worker:
             self.worker.stop()
             self.worker = None
@@ -643,6 +709,8 @@ class MainWindow(QMainWindow):
     # Señales que llegan del worker
     # ------------------------------------------------------------------
     def _on_frame(self, image: QImage, detections: list) -> None:
+        if self.worker is None:
+            return
         self.viewer.show_image(image)
         # La tabla se refresca como mucho 8 veces por segundo: a 60 FPS los
         # números serían ilegibles y redibujar la tabla tiene su coste.
@@ -661,6 +729,8 @@ class MainWindow(QMainWindow):
                 self.table.setItem(row, col, item)
 
     def _on_stats(self, data: dict) -> None:
+        self._screen_bounds = data.get("screen_bounds")
+        self._sync_desktop_overlay()
         self.aim_status.setText("AIM  /  " + data.get("aim", "Desactivado"))
         self.stat_labels["fps"].setText(f"{data['fps']:.0f}")
         self.stat_labels["infer"].setText(f"{data['infer_ms']:.1f} ms")
@@ -680,7 +750,11 @@ class MainWindow(QMainWindow):
 
     def closeEvent(self, event) -> None:  # noqa: N802 - nombre impuesto por Qt
         """Al cerrar la ventana: parar el hilo y guardar los ajustes."""
+        self._aim_timer.stop()
+        self._capture_timer.stop()
+        self.desktop_overlay.close()
         if self.worker:
             self.worker.stop()
+            self.worker = None
         self.settings.save()
         super().closeEvent(event)

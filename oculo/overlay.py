@@ -5,7 +5,7 @@ listo para mostrar en la ventana. Se dibuja con QPainter (el "pincel" de Qt)
 porque da bordes suavizados y texto nítido, mejor que cv2.putText.
 
 Importante: el overlay se pinta sobre una COPIA de la imagen dentro del
-visor de la app. No se dibuja nada encima de otras ventanas.
+visor de la app. El FOV de escritorio vive en ui/desktop_overlay.py.
 """
 
 from __future__ import annotations
@@ -65,17 +65,6 @@ def render(
     font.setWeight(QFont.Weight.DemiBold)
     p.setFont(font)
     metrics = p.fontMetrics()
-
-    if s.aim_enabled and s.aim_show_fov and geometry is not None:
-        from .aim import options
-        cx, cy = geometry.local_crosshair
-        p.setPen(QPen(QColor("#54DCC0"), 1))
-        p.setBrush(Qt.BrushStyle.NoBrush)
-        radius = options(s)["fov"]
-        p.drawEllipse(QPointF(cx, cy), radius*geometry.pixel_width/geometry.width,
-                      radius*geometry.pixel_height/geometry.height)
-        p.drawLine(QPointF(cx-7, cy), QPointF(cx+7, cy))
-        p.drawLine(QPointF(cx, cy-7), QPointF(cx, cy+7))
 
     for d in detections:
         color = QColor(
