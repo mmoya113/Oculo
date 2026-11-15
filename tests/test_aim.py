@@ -53,7 +53,7 @@ def test_nearest_fov_and_sticky_grace_no_blind_motion():
 
 
 def test_no_target_outside_fov_and_invalid_boxes():
-    e, s = AimEngine(), Settings(aim_fov=20)
+    e, s = AimEngine(), Settings(aim_fov=20, aim_limit_fov=True)
     assert e.step([box(21), box(float("nan")), Target(10,0,0,10,0)], (0,0), 0, s) == (0,0)
 
 

@@ -98,22 +98,25 @@ class Settings:
     aim_activation: str = "mouse:right"
     aim_emergency: str = "key:f8"
     aim_mode: str = "exponential"
+    aim_input_method: str = "quartz_hid"
+    input_test_results: dict[str, str] = field(default_factory=dict)
+    aim_limit_fov: bool = False      # apagado = buscar en todo el monitor
     aim_fov: float = 180.0            # radio desde la mira real del monitor
     aim_sticky: bool = True
     aim_match_radius: float = 80.0
     aim_lost_ms: int = 120            # retener identidad; nunca mover sin detección
     aim_point_y: float = 0.5          # 0 = parte superior, 1 = inferior
-    aim_response_ms: float = 160.0
+    aim_response_ms: float = 180.0
     aim_ema: float = 0.65             # peso de la medición nueva a 60 Hz
     aim_prediction_ms: float = 0.0    # apagada por defecto (cámara no observable)
     aim_prediction_limit: float = 8.0
     aim_deadzone: float = 2.0
-    aim_max_step: float = 12.0
-    aim_max_speed: float = 600.0      # puntos por segundo
+    aim_max_step: float = 8.0
+    aim_max_speed: float = 400.0      # puntos por segundo
     aim_gain_x: float = 1.0           # calibración entrada -> desplazamiento visual
     aim_gain_y: float = 1.0
-    aim_stale_ms: int = 100
-    aim_show_fov: bool = True
+    aim_stale_ms: int = 200
+    aim_show_fov: bool = False
 
     # --- Visor ---
     box_color: str = "#8B7CFF"
@@ -142,7 +145,15 @@ class Settings:
         lo que no exista se queda con su valor por defecto.
         """
         valid = {f.name for f in fields(cls)}
-        return cls(**{k: v for k, v in data.items() if k in valid})
+        values = {k: v for k, v in data.items() if k in valid}
+        from .macos_input import INPUT_METHODS
+        method = values.get("aim_input_method", "quartz_hid")
+        if not isinstance(method, str) or method not in INPUT_METHODS:
+            values["aim_input_method"] = "quartz_hid"
+        results = values.get("input_test_results", {})
+        values["input_test_results"] = ({k:v for k,v in results.items()
+            if k in INPUT_METHODS and v in ("accepted", "ignored")} if isinstance(results, dict) else {})
+        return cls(**values)
 
     def save(self, path: Path | None = None) -> None:
         target = path or settings_path()

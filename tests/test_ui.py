@@ -10,6 +10,7 @@ def test_window_presets_panic_and_cinema(monkeypatch, tmp_path):
     app = QApplication.instance() or QApplication([])
     monkeypatch.setattr(Settings, "load", classmethod(lambda cls: cls()))
     monkeypatch.setattr(Settings, "save", lambda self: None)
+    monkeypatch.setattr("oculo.ui.main_window.screen_capture_allowed", lambda **kw:True)
     window = MainWindow()
     window.show()
     app.processEvents()
@@ -24,4 +25,155 @@ def test_window_presets_panic_and_cinema(monkeypatch, tmp_path):
     window.toggle_cinema(False)
     app.processEvents()
     assert not window.isFullScreen()
+    window.close()
+
+
+def test_capture_permission_blocks_start_and_links_recovery(monkeypatch):
+    app = QApplication.instance() or QApplication([])
+    monkeypatch.setattr(Settings, "load", classmethod(lambda cls: cls()))
+    monkeypatch.setattr(Settings, "save", lambda self: None)
+    monkeypatch.setattr("oculo.ui.main_window.screen_capture_allowed", lambda **kw:False)
+    window = MainWindow()
+    window.show()
+    app.processEvents()
+    window.start()
+    assert window.worker is None
+    assert window.capture_banner.isVisible()
+    assert "bloqueada" in window.viewer.text()
+    assert "Grabación de pantalla" in window.capture_help.text()
+    window.close()
+
+
+def test_header_drag_fallback_and_button_interaction(monkeypatch):
+    from PySide6.QtCore import QPointF, Qt, QEvent
+    from PySide6.QtGui import QMouseEvent
+    from PySide6.QtWidgets import QMainWindow, QPushButton
+    from PySide6.QtTest import QTest
+    from types import SimpleNamespace
+    from oculo.ui.titlebar import DraggableHeader
+    app = QApplication.instance() or QApplication([])
+    window = QMainWindow()
+    header = DraggableHeader()
+    button = QPushButton("Keep clickable", header)
+    button.move(0,0)
+    window.setCentralWidget(header)
+    window.resize(500,100)
+    window.show()
+    app.processEvents()
+    monkeypatch.setattr(window, "windowHandle", lambda:SimpleNamespace(startSystemMove=lambda:False))
+    original = window.pos()
+    press = QMouseEvent(QEvent.Type.MouseButtonPress, QPointF(200,50), QPointF(400,400),
+                        Qt.MouseButton.LeftButton, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier)
+    header.mousePressEvent(press)
+    move = QMouseEvent(QEvent.Type.MouseMove, QPointF(230,70), QPointF(430,420),
+                       Qt.MouseButton.NoButton, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier)
+    header.mouseMoveEvent(move)
+    assert window.pos() == original + QPointF(30,20).toPoint()
+    release = QMouseEvent(QEvent.Type.MouseButtonRelease, QPointF(230,70), QPointF(430,420),
+                          Qt.MouseButton.LeftButton, Qt.MouseButton.NoButton, Qt.KeyboardModifier.NoModifier)
+    header.mouseReleaseEvent(release)
+    assert header._drag_offset is None
+    clicked = []
+    button.clicked.connect(lambda:clicked.append(True))
+    QTest.mouseClick(button, Qt.MouseButton.LeftButton)
+    assert clicked == [True]
+    window.close()
+
+
+def test_desktop_fov_is_passive_separate_and_not_baked_in_preview(monkeypatch):
+    import numpy as np
+    from PySide6.QtCore import Qt
+    from oculo.ui.desktop_overlay import DesktopOverlay
+    from oculo.overlay import render
+    from oculo.aim import ScreenGeometry
+    app = QApplication.instance() or QApplication([])
+    overlay = DesktopOverlay()
+    overlay.configure((-1000, 50, 1000,800), 180, True)
+    assert overlay.isVisible()
+    assert overlay.geometry().getRect() == (-1000,50,1000,800)
+    assert overlay.radius == 180
+    assert overlay.windowFlags() & Qt.WindowType.WindowTransparentForInput
+    assert overlay.windowFlags() & Qt.WindowType.WindowDoesNotAcceptFocus
+    s = Settings(aim_enabled=True, aim_show_fov=True, show_stats=False)
+    image = render(np.zeros((200,200,3),np.uint8), [], s, geometry=
+                   ScreenGeometry(0,0,200,200,200,200,100,100))
+    assert image.pixelColor(100,100).name() == "#000000"
+    overlay.configure(None,180,False)
+    assert not overlay.isVisible()
+    overlay.close()
+
+
+def test_every_aim_setting_has_hover_help_and_default_button_preserves_model(monkeypatch):
+    from PySide6.QtWidgets import QLabel
+    from oculo.ui.aim_help import AIM_HELP
+    app = QApplication.instance() or QApplication([])
+    monkeypatch.setattr(Settings, "load", classmethod(lambda cls: cls()))
+    monkeypatch.setattr(Settings, "save", lambda self: None)
+    monkeypatch.setattr("oculo.ui.main_window.screen_capture_allowed",lambda **kw:True)
+    window=MainWindow()
+    badges=window.findChildren(QLabel,"helpBadge")
+    assert {b.property("setting") for b in badges} == set(AIM_HELP)
+    assert all(b.text() == "?" and len(b.toolTip()) > 50 for b in badges)
+    window.settings.model="my-existing-model.onnx"
+    window.settings.source="video"
+    window.settings.log_enabled=True
+    window.settings.aim_mode="bezier"
+    window.settings.aim_prediction_ms=90
+    window.settings.aim_enabled=True
+    window._apply_aim_defaults()
+    assert window.settings.model == "my-existing-model.onnx"
+    assert window.settings.source == "video" and window.settings.log_enabled
+    assert window.settings.aim_mode == "exponential"
+    assert window.settings.aim_stale_ms == 200
+    assert window.settings.aim_prediction_ms == 0
+    assert window.settings.aim_enabled is False
+    window.close()
+
+
+def test_stop_cancels_pending_mouse_probe(monkeypatch):
+    from types import SimpleNamespace
+    app=QApplication.instance() or QApplication([])
+    monkeypatch.setattr(Settings,"load",classmethod(lambda cls:cls()))
+    monkeypatch.setattr(Settings,"save",lambda self:None)
+    monkeypatch.setattr("oculo.ui.main_window.screen_capture_allowed",lambda **kw:True)
+    window=MainWindow()
+    cancelled=[]
+    window._mouse_probe=SimpleNamespace(cancel=lambda:cancelled.append(True) or "cancelada")
+    window._probe_timer.start()
+    window.probe_button.setEnabled(False)
+    window.stop()
+    assert cancelled == [True]
+    assert window._mouse_probe is None
+    assert not window._probe_timer.isActive()
+    assert window.probe_button.isEnabled()
+    window.close()
+
+
+def test_saved_overlay_always_starts_hidden_and_fov_limit_defaults_off(monkeypatch):
+    app=QApplication.instance() or QApplication([])
+    monkeypatch.setattr(Settings,"load",classmethod(lambda cls:cls(aim_show_fov=True)))
+    monkeypatch.setattr(Settings,"save",lambda self:None)
+    monkeypatch.setattr("oculo.ui.main_window.screen_capture_allowed",lambda **kw:True)
+    window=MainWindow()
+    assert window.settings.aim_show_fov is False
+    assert window.settings.aim_limit_fov is False
+    assert not window.desktop_overlay.isVisible()
+    window.close()
+
+
+def test_user_confirmed_gfn_result_is_attached_to_the_tested_input_method(monkeypatch):
+    app=QApplication.instance() or QApplication([])
+    monkeypatch.setattr(Settings,"load",classmethod(lambda cls:cls()))
+    monkeypatch.setattr(Settings,"save",lambda self:None)
+    monkeypatch.setattr("oculo.ui.main_window.screen_capture_allowed",lambda **kw:True)
+    window=MainWindow()
+    assert window._pending_input_result is None
+    window._record_input_result(True)
+    assert window.settings.input_test_results=={}
+    window._pending_input_result="relative_session"
+    window.settings.aim_input_method="relative_session"
+    window._record_input_result(False)
+    assert window.settings.input_test_results=={"relative_session":"ignored"}
+    assert "sin respuesta" in window.input_result_label.text()
+    assert not window.input_yes_button.isEnabled()
     window.close()

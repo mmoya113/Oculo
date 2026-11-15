@@ -43,13 +43,19 @@ def options(s: Settings) -> dict:
     limits = {
         "fov": (1, 2000, 180), "match_radius": (1, 500, 80),
         "lost_ms": (0, 500, 120), "point_y": (0, 1, .5),
-        "response_ms": (20, 2000, 160), "ema": (.01, 1, .65),
+        "response_ms": (20, 2000, 180), "ema": (.01, 1, .65),
         "prediction_ms": (0, 100, 0), "prediction_limit": (0, 30, 8),
-        "deadzone": (0, 30, 2), "max_step": (.1, 100, 12),
-        "max_speed": (1, 3000, 600), "gain_x": (.05, 10, 1),
-        "gain_y": (.05, 10, 1), "stale_ms": (20, 500, 100),
+        "deadzone": (0, 30, 2), "max_step": (1, 100, 8),
+        "max_speed": (1, 3000, 400), "gain_x": (.05, 10, 1),
+        "gain_y": (.05, 10, 1), "stale_ms": (20, 500, 200),
     }
     return {k: bounded(getattr(s, "aim_" + k), *v) for k, v in limits.items()}
+
+
+def eligible_targets(targets, crosshair, s):
+    p = options(s)
+    return [t for t in targets if t.valid() and (not s.aim_limit_fov or
+            math.dist(t.point(p["point_y"]), crosshair) <= p["fov"])]
 
 
 def overlap(a: Target, b: Target) -> float:
@@ -74,7 +80,7 @@ class AimEngine:
     def step(self, targets: list[Target], crosshair: tuple[float, float],
              now: float, s: Settings) -> tuple[float, float]:
         p = options(s)
-        signature = tuple(p.items()) + (s.aim_mode, s.aim_sticky)
+        signature = tuple(p.items()) + (s.aim_mode, s.aim_sticky, s.aim_limit_fov)
         if signature != self.signature:
             self.reset()
             self.signature = signature
@@ -92,8 +98,7 @@ class AimEngine:
         self.time = now
         point = lambda t: t.point(p["point_y"])
         distance = lambda a, b: math.hypot(a[0]-b[0], a[1]-b[1])
-        candidates = [t for t in targets if t.valid() and
-                      distance(point(t), crosshair) <= p["fov"]]
+        candidates = eligible_targets(targets, crosshair, s)
         selected = None
         continuing = False
         if s.aim_sticky and self.target is not None:
@@ -185,3 +190,33 @@ class ScreenGeometry:
     def local_crosshair(self):
         return ((self.crosshair_x-self.left)*self.pixel_width/self.width,
                 (self.crosshair_y-self.top)*self.pixel_height/self.height)
+
+
+class MotionAccumulator:
+    """Keep sub-point motion until Quartz can emit integer deltas.
+
+    Remainders are bounded below one point, cleared on reversal/reset, and
+    clipped to the current measured error. Nothing is queued across frames.
+    """
+    def __init__(self):
+        self.reset()
+
+    def reset(self):
+        self.carry = [0., 0.]
+
+    def step(self, delta, limits, max_step):
+        result = []
+        for axis, value in enumerate(delta):
+            if value == 0 or value*self.carry[axis] < 0:
+                self.carry[axis] = 0.
+            total = self.carry[axis] + value
+            limit = math.floor(max(0., limits[axis]))
+            whole = math.copysign(min(abs(math.trunc(total)), limit), total)
+            result.append(int(whole))
+            self.carry[axis] = (total-whole) if abs(total-whole) < 1 else 0.
+        # Quantization can cross a vector cap by <sqrt(2); keep the hard cap.
+        while math.hypot(*result) > max_step:
+            axis = 0 if abs(result[0]) >= abs(result[1]) else 1
+            result[axis] -= 1 if result[axis] > 0 else -1
+            self.carry[axis] = 0.
+        return tuple(result)

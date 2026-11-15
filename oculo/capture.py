@@ -16,6 +16,7 @@ import numpy as np
 
 from .config import Settings
 from .aim import ScreenGeometry
+from .screen_access import require_screen_capture
 
 
 def zone_rect(frame_w: int, frame_h: int, s: Settings) -> tuple[int, int, int, int]:
@@ -61,14 +62,21 @@ class ScreenSource(FrameSource):
     def __init__(self, monitor: int = 1):
         import mss  # se importa aquí para que los tests no lo necesiten
 
+        require_screen_capture()
         self.geometry = None
         self._sct = mss.mss()
         # monitors[0] es "todas las pantallas juntas"; las reales empiezan en 1.
         index = monitor if 0 < monitor < len(self._sct.monitors) else 1
         self._mon = self._sct.monitors[index]
+        self.bounds = tuple(self._mon[k] for k in ("left", "top", "width", "height"))
 
     def read(self, s: Settings) -> np.ndarray | None:
-        x, y, w, h = zone_rect(self._mon["width"], self._mon["height"], s)
+        require_screen_capture()  # also catches a permission revoked while running
+        # Full-monitor aim must not retain the old hidden 640x640 crop.
+        if s.aim_limit_fov:
+            x, y, w, h = zone_rect(self._mon["width"], self._mon["height"], s)
+        else:
+            x, y, w, h = 0, 0, self._mon["width"], self._mon["height"]
         region = {
             "left": self._mon["left"] + x,
             "top": self._mon["top"] + y,
