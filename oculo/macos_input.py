@@ -23,51 +23,86 @@ class QuartzInput:
             raise RuntimeError("El control del ratón requiere macOS.")
         self.cg = C.CDLL("/System/Library/Frameworks/CoreGraphics.framework/CoreGraphics")
         self.cf = C.CDLL("/System/Library/Frameworks/CoreFoundation.framework/CoreFoundation")
-        self.ax = C.CDLL("/System/Library/Frameworks/ApplicationServices.framework/ApplicationServices")
         def bind(lib, name, result, *args):
             f = getattr(lib, name)
             f.restype, f.argtypes = result, list(args)
             return f
-        bind(self.ax, "AXIsProcessTrusted", C.c_bool)
-        bind(self.cg, "CGPreflightListenEventAccess", C.c_bool)
+        for name in ("CGPreflightListenEventAccess", "CGRequestListenEventAccess",
+                     "CGPreflightPostEventAccess", "CGRequestPostEventAccess"):
+            bind(self.cg, name, C.c_bool)
+        bind(self.cg, "CGEventSourceCreate", C.c_void_p, C.c_int)
         bind(self.cg, "CGEventSourceButtonState", C.c_bool, C.c_int, C.c_uint32)
         bind(self.cg, "CGEventSourceKeyState", C.c_bool, C.c_int, C.c_uint16)
         bind(self.cg, "CGEventCreate", C.c_void_p, C.c_void_p)
         bind(self.cg, "CGEventGetLocation", Point, C.c_void_p)
         bind(self.cg, "CGEventCreateMouseEvent", C.c_void_p, C.c_void_p,
              C.c_uint32, Point, C.c_uint32)
-        bind(self.cg, "CGEventSetDoubleValueField", None, C.c_void_p, C.c_uint32, C.c_double)
+        bind(self.cg, "CGEventSetIntegerValueField", None, C.c_void_p, C.c_uint32, C.c_int64)
         bind(self.cg, "CGEventPost", None, C.c_uint32, C.c_void_p)
         bind(self.cf, "CFRelease", None, C.c_void_p)
 
+    def permissions(self):
+        return {"posting": bool(self.cg.CGPreflightPostEventAccess()),
+                "listening": bool(self.cg.CGPreflightListenEventAccess())}
+
     def ready(self):
-        return self.ax.AXIsProcessTrusted() and self.cg.CGPreflightListenEventAccess()
+        return all(self.permissions().values())
+
+    def permission_message(self):
+        p = self.permissions()
+        missing = []
+        if not p["posting"]:
+            missing.append("Accesibilidad para mover el ratón")
+        if not p["listening"]:
+            missing.append("Monitorización de entrada para leer activación y parada")
+        return "Falta " + " y ".join(missing) if missing else "Permisos de ratón concedidos"
+
+    def request_permissions(self):
+        p = self.permissions()
+        if not p["posting"]:
+            self.cg.CGRequestPostEventAccess()
+        if not p["listening"]:
+            self.cg.CGRequestListenEventAccess()
+        return self.permissions()
+
+    def position(self):
+        event = self.cg.CGEventCreate(None)
+        if not event:
+            raise RuntimeError("Quartz no pudo leer la posición del cursor.")
+        try:
+            point = self.cg.CGEventGetLocation(event)
+            return point.x, point.y
+        finally:
+            self.cf.CFRelease(event)
 
     def pressed(self, binding):
         kind, _, name = binding.partition(":")
         if kind == "mouse":
             button = {"left":0, "right":1, "middle":2, "4":3, "5":4}.get(name)
-            return button is not None and self.cg.CGEventSourceButtonState(1, button)
-        return name in KEYS and self.cg.CGEventSourceKeyState(1, KEYS[name])
+            return button is not None and self.cg.CGEventSourceButtonState(0, button)
+        return name in KEYS and self.cg.CGEventSourceKeyState(0, KEYS[name])
 
     def move(self, dx, dy):
-        event = self.cg.CGEventCreate(None)
-        if not event:
-            raise RuntimeError("Quartz no pudo leer la posición del cursor.")
-        try:
-            position = self.cg.CGEventGetLocation(event)
-        finally:
-            self.cf.CFRelease(event)
-        # Relative deltas plus a relative cursor destination. Never warp to target.
+        if not self.ready():
+            raise PermissionError(self.permission_message())
+        if int(dx) != dx or int(dy) != dy:
+            raise ValueError("El movimiento de Quartz requiere pasos enteros acumulados.")
+        x, y = self.position()
         right, left = self.pressed("mouse:right"), self.pressed("mouse:left")
         kind, button = (6, 0) if left else ((7, 1) if right else (5, 0))
-        event = self.cg.CGEventCreateMouseEvent(None, kind,
-                                               Point(position.x+dx, position.y+dy), button)
-        if not event:
-            raise RuntimeError("Quartz no pudo crear el movimiento.")
+        # Current session source, as recommended for a user-session application.
+        source = self.cg.CGEventSourceCreate(0)
+        if not source:
+            raise RuntimeError("Quartz no pudo crear la fuente de entrada.")
         try:
-            self.cg.CGEventSetDoubleValueField(event, 4, dx)  # mouseEventDeltaX
-            self.cg.CGEventSetDoubleValueField(event, 5, dy)  # mouseEventDeltaY
-            self.cg.CGEventPost(0, event)  # kCGHIDEventTap
+            event = self.cg.CGEventCreateMouseEvent(source, kind, Point(x+dx, y+dy), button)
+            if not event:
+                raise RuntimeError("Quartz no pudo crear el movimiento.")
+            try:
+                self.cg.CGEventSetIntegerValueField(event, 4, dx)
+                self.cg.CGEventSetIntegerValueField(event, 5, dy)
+                self.cg.CGEventPost(0, event)
+            finally:
+                self.cf.CFRelease(event)
         finally:
-            self.cf.CFRelease(event)
+            self.cf.CFRelease(source)

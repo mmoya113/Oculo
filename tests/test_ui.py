@@ -101,3 +101,49 @@ def test_desktop_fov_is_passive_separate_and_not_baked_in_preview(monkeypatch):
     overlay.configure(None,180,False)
     assert not overlay.isVisible()
     overlay.close()
+
+
+def test_every_aim_setting_has_hover_help_and_default_button_preserves_model(monkeypatch):
+    from PySide6.QtWidgets import QLabel
+    from oculo.ui.aim_help import AIM_HELP
+    app = QApplication.instance() or QApplication([])
+    monkeypatch.setattr(Settings, "load", classmethod(lambda cls: cls()))
+    monkeypatch.setattr(Settings, "save", lambda self: None)
+    monkeypatch.setattr("oculo.ui.main_window.screen_capture_allowed",lambda **kw:True)
+    window=MainWindow()
+    badges=window.findChildren(QLabel,"helpBadge")
+    assert {b.property("setting") for b in badges} == set(AIM_HELP)
+    assert all(b.text() == "?" and len(b.toolTip()) > 50 for b in badges)
+    window.settings.model="my-existing-model.onnx"
+    window.settings.source="video"
+    window.settings.log_enabled=True
+    window.settings.aim_mode="bezier"
+    window.settings.aim_prediction_ms=90
+    window.settings.aim_enabled=True
+    window._apply_aim_defaults()
+    assert window.settings.model == "my-existing-model.onnx"
+    assert window.settings.source == "video" and window.settings.log_enabled
+    assert window.settings.aim_mode == "exponential"
+    assert window.settings.aim_stale_ms == 200
+    assert window.settings.aim_prediction_ms == 0
+    assert window.settings.aim_enabled is False
+    window.close()
+
+
+def test_stop_cancels_pending_mouse_probe(monkeypatch):
+    from types import SimpleNamespace
+    app=QApplication.instance() or QApplication([])
+    monkeypatch.setattr(Settings,"load",classmethod(lambda cls:cls()))
+    monkeypatch.setattr(Settings,"save",lambda self:None)
+    monkeypatch.setattr("oculo.ui.main_window.screen_capture_allowed",lambda **kw:True)
+    window=MainWindow()
+    cancelled=[]
+    window._mouse_probe=SimpleNamespace(cancel=lambda:cancelled.append(True) or "cancelada")
+    window._probe_timer.start()
+    window.probe_button.setEnabled(False)
+    window.stop()
+    assert cancelled == [True]
+    assert window._mouse_probe is None
+    assert not window._probe_timer.isActive()
+    assert window.probe_button.isEnabled()
+    window.close()

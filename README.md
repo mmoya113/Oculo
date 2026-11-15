@@ -193,7 +193,7 @@ La interfaz separa **Aim**, **Detección** y **Visor / datos**, con estado del c
 1. Añade tu modelo ONNX y selecciona **Pantalla**, monitor y zona. La mira se considera en el centro del monitor seleccionado; usa el juego a pantalla completa, centrado. No se detecta automáticamente una ventana de juego ni su sensibilidad.
 2. En **Ajustes del Sistema → Privacidad y seguridad**, concede **Grabación de pantalla**, **Accesibilidad** y **Monitorización de entrada** a Oculo; reinícialo si macOS lo pide. Oculo muestra el permiso que falta sin intentar eludirlo.
 3. Pulsa **Iniciar**, habilita **Aim assist** y mantén **clic derecho**. Se pueden elegir otros botones o teclas físicas US. **F8** (posiblemente Fn+F8) detiene globalmente el Aim y queda bloqueado hasta deshabilitarlo y habilitarlo otra vez. **Parada Aim** funciona desde la cabecera. La parada no genera clics ni libera botones que tú mantienes.
-4. Empieza con Exponential, respuesta 160 ms, EMA 0.65, predicción 0, paso 12, velocidad 600 y ganancia 1. El FOV es un **radio en puntos macOS**, independiente de Retina; 180 puntos equivalen a 360 píxeles con escala 2x.
+4. Empieza con Exponential, respuesta 180 ms, EMA 0.65, predicción 0, paso 8, velocidad 400 y ganancia 1. El FOV es un **radio en puntos macOS**, independiente de Retina; 180 puntos equivalen a 360 píxeles con escala 2x.
 5. Ajusta la ganancia visual X/Y: si un punto enviado desplaza el objetivo unos dos puntos en sentido contrario, usa ganancia 2. Un valor demasiado bajo puede provocar sobrecorrecciones con la sensibilidad del juego. Aumenta respuesta y reduce paso/velocidad si hay latencia.
 
 ### Selección y movimiento
@@ -232,3 +232,23 @@ Referencias de implementación: [área de título de Qt](https://www.qt.io/blog/
 - **FOV opcional:** la opción «Mostrar FOV y mira sobre otras apps» crea una ventana transparente independiente en el monitor capturado. Está centrada en el monitor, no en el recorte ni en el visor, no recibe foco/clics y usa `canJoinAllSpaces` + `fullScreenAuxiliary` para acompañar los escritorios y ventanas a pantalla completa. Se oculta al detener, desactivar Aim, usar vídeo/webcam, cerrar Oculo o activar la parada. No se dibuja dentro de la imagen del visor; con captura MSS/Quartz la ventana se marca no compartible para evitar recapturar el FOV. Las restricciones de algunas apps/pantallas protegidas pueden impedir superposiciones.
 
 Validación manual pendiente en el equipo del usuario: conceder el permiso al DMG instalado, colocar Chrome delante de la zona capturada y cambiar de escritorio con tres dedos. Las pruebas automáticas cubren denegación/revocación del permiso, fidelidad de píxeles y geometría, arrastre y botones, separación del FOV del visor y comportamiento pasivo de la superposición. La CI prueba además el arranque del .app empaquetado.
+
+
+## 1.0.2: ayuda, configuración inicial y diagnóstico de movimiento
+
+En la pestaña **Aim**, cada opción tiene un **?** con una explicación al pasar el ratón. Los ajustes de calibración/latencia están ocultos bajo «Mostrar ajustes avanzados» para empezar con menos controles.
+
+Pulsa **Cargar configuración inicial** para aplicar Exponential, respuesta 180 ms, EMA 0,65, FOV 180 puntos, zona muerta 2, paso máximo 8, velocidad 400, predicción 0 y caducidad 200 ms. Conserva tu modelo, fuente, detección, colores y registro. Deja Aim desactivado para que tú lo habilites cuando estés listo. Es una base conservadora para probar, no una garantía de compatibilidad o calibración de tu juego. Los ajustes ya guardados no se reemplazan automáticamente al actualizar.
+
+### Si hay cajas pero el ratón no se mueve
+
+1. **Autorizar control del ratón** solicita los permisos específicos de macOS: Accesibilidad para publicar movimiento y Monitorización de entrada para leer la activación/parada. Grabación de pantalla solo permite ver las apps, no mover el ratón. Hay accesos directos a ambas secciones de Ajustes.
+2. Pulsa **Probar movimiento del ratón (3 s)**, suelta los botones y deja el cursor quieto, lejos del borde. Esta prueba desactiva Aim y manda **un único paso de 12 puntos a la derecha**, sin modelo ni tecla de Aim, y después comprueba si cambió la posición del cursor. F8, la parada configurada, Parada Aim, Detener o cerrar Oculo cancelan los pasos pendientes. La prueba puede no ser concluyente si mueves el ratón o estás en un juego con cursor bloqueado; úsala en el escritorio.
+3. Si la prueba mueve el cursor, pulsa Iniciar, habilita Aim y mantén la activación. La franja muestra el motivo real: esperando tecla, sin detecciones, fuera del FOV, retención del objetivo, suficientemente centrado, imagen caducada o envío de movimiento. También muestra tecla detectada, objetivos dentro del FOV, edad de imagen, descartes por retraso y número de envíos.
+4. Una imagen que tarda más que el límite de caducidad se descarta. Antes el límite era 100 ms y el aviso desaparecía en el siguiente sondeo de entrada, por lo que podía verse «Activo» aunque nunca se enviase un movimiento. Ahora el aviso permanece visible; el nuevo perfil inicial usa 200 ms. Reduce la zona/modelo si llega tarde; aumentar mucho el límite empeora la respuesta y puede desestabilizar un juego.
+5. Los pasos inferiores a un punto se acumulan hasta poder enviar un delta entero. Se reinician al soltar, parar, invertir dirección o perder la medición, y se limitan al error actual/paso máximo. Evita que el redondeo de los deltas Quartz deje siempre en cero las correcciones pequeñas. Se usa el estado/fuente de la sesión actual y deltas enteros de Quartz.
+
+En el escritorio el cursor puede moverse sin que la caja detectada cambie de posición: mover el cursor no mueve el contenido de una ventana. En un juego el movimiento relativo controla la cámara, según su sensibilidad y soporte de entrada. «Enviando movimiento» confirma que Oculo llamó a Quartz; no confirma que un juego aceptase el evento. La prueba de escritorio sí comprueba el desplazamiento observado del cursor.
+
+Referencias: [estado de eventos de sesión de Apple](https://developer.apple.com/documentation/coregraphics/cgeventsourcestateid), [deltas enteros de ratón](https://developer.apple.com/documentation/coregraphics/cgeventfield/mouseeventdeltax), [solicitud de acceso a entrada](https://developer.apple.com/documentation/coregraphics/cgrequestlisteneventaccess()).
+

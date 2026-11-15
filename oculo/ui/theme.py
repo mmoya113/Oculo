@@ -127,3 +127,7 @@ STYLESHEET += """
 QFrame#captureBanner { background: #30271B; border: 1px solid #75603B; border-radius: 10px; }
 QFrame#captureBanner QLabel { color: #F3D9A8; font-size: 12px; }
 """
+
+STYLESHEET += """
+QLabel#helpBadge { color: #54DCC0; border: 1px solid #35564F; border-radius: 9px; font-weight: 700; font-size: 11px; }
+"""

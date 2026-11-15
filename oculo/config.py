@@ -103,16 +103,16 @@ class Settings:
     aim_match_radius: float = 80.0
     aim_lost_ms: int = 120            # retener identidad; nunca mover sin detección
     aim_point_y: float = 0.5          # 0 = parte superior, 1 = inferior
-    aim_response_ms: float = 160.0
+    aim_response_ms: float = 180.0
     aim_ema: float = 0.65             # peso de la medición nueva a 60 Hz
     aim_prediction_ms: float = 0.0    # apagada por defecto (cámara no observable)
     aim_prediction_limit: float = 8.0
     aim_deadzone: float = 2.0
-    aim_max_step: float = 12.0
-    aim_max_speed: float = 600.0      # puntos por segundo
+    aim_max_step: float = 8.0
+    aim_max_speed: float = 400.0      # puntos por segundo
     aim_gain_x: float = 1.0           # calibración entrada -> desplazamiento visual
     aim_gain_y: float = 1.0
-    aim_stale_ms: int = 100
+    aim_stale_ms: int = 200
     aim_show_fov: bool = True
 
     # --- Visor ---

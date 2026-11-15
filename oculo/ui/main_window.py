@@ -36,6 +36,8 @@ from .titlebar import DraggableHeader
 from ..screen_access import screen_capture_allowed, PERMISSION_HELP
 from .desktop_overlay import DesktopOverlay
 from ..aim import options
+from .aim_help import AIM_HELP
+from ..input_probe import MovementProbe
 
 
 class Viewer(QLabel):
@@ -80,6 +82,7 @@ class MainWindow(QMainWindow):
         self.worker: DetectionWorker | None = None
         self.desktop_overlay = DesktopOverlay()
         self._screen_bounds = None
+        self._mouse_probe = None
         self._binders: list = []          # funciones ajustes -> control
         self._last_table_update = 0.0
 
@@ -117,6 +120,9 @@ class MainWindow(QMainWindow):
         self._aim_timer.setInterval(100)
         self._aim_timer.timeout.connect(self._refresh_aim_status)
         self._aim_timer.start()
+        self._probe_timer = QTimer(self)
+        self._probe_timer.setInterval(20)
+        self._probe_timer.timeout.connect(self._poll_mouse_probe)
         self._capture_timer = QTimer(self)
         self._capture_timer.setInterval(1000)
         self._capture_timer.timeout.connect(self._refresh_capture_access)
@@ -198,6 +204,22 @@ class MainWindow(QMainWindow):
         binding_options = [(mouse_names[b.split(":")[1]] if b.startswith("mouse:")
                             else "Tecla " + b.split(":")[1].upper(), b) for b in BINDINGS]
         column = page("Aim")
+        card = self._card(column, "EMPEZAR AQUÍ")
+        defaults = QPushButton("Cargar configuración inicial")
+        defaults.clicked.connect(self._apply_aim_defaults)
+        card.addWidget(defaults)
+        permissions = QPushButton("Autorizar control del ratón")
+        permissions.clicked.connect(self._request_input_permissions)
+        card.addWidget(permissions)
+        self.probe_button = QPushButton("Probar movimiento del ratón (3 s)")
+        self.probe_button.setToolTip("Desactiva Aim y, tras 3 segundos, mueve el cursor 12 puntos a la derecha una sola vez. No necesita modelo ni detecciones. Suelta los botones y deja el ratón quieto, lejos del borde. F8 o tu parada configurada cancela la prueba.")
+        self.probe_button.clicked.connect(self._start_mouse_probe)
+        card.addWidget(self.probe_button)
+        links = QLabel('<a style="color:#54DCC0" href="x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility">Accesibilidad</a> · '
+                       '<a style="color:#54DCC0" href="x-apple.systempreferences:com.apple.preference.security?Privacy_ListenEvent">Monitorización de entrada</a>')
+        links.setOpenExternalLinks(True)
+        links.setWordWrap(True)
+        card.addWidget(links)
         card = self._card(column, "01  /  ACTIVACIÓN")
         self._check(card, "Habilitar Aim assist", "aim_enabled")
         card.addWidget(QLabel("Mantener para activar", objectName="fieldLabel"))
@@ -224,7 +246,14 @@ class MainWindow(QMainWindow):
         self._slider(card, "Zona muerta (puntos)", "aim_deadzone", 0, 150, scale=10)
         self._slider(card, "Paso máximo (puntos)", "aim_max_step", 1, 50)
         self._slider(card, "Velocidad máxima (puntos/s)", "aim_max_speed", 20, 1500)
+        advanced = QPushButton("Mostrar ajustes avanzados")
+        advanced.setCheckable(True)
+        column.addWidget(advanced)
         card = self._card(column, "04  /  CALIBRACIÓN Y LATENCIA")
+        card.parentWidget().hide()
+        advanced.toggled.connect(card.parentWidget().setVisible)
+        advanced.toggled.connect(lambda checked: advanced.setText(
+            "Ocultar ajustes avanzados" if checked else "Mostrar ajustes avanzados"))
         self._slider(card, "Ganancia visual X por punto enviado", "aim_gain_x", 5, 500, scale=100)
         self._slider(card, "Ganancia visual Y por punto enviado", "aim_gain_y", 5, 500, scale=100)
         self._slider(card, "Predicción (ms; 0 recomendado)", "aim_prediction_ms", 0, 100)
@@ -363,6 +392,9 @@ class MainWindow(QMainWindow):
         self.aim_status = QLabel("AIM  /  Desactivado", objectName="aimStatus")
         self.aim_status.setWordWrap(True)
         column.addWidget(self.aim_status)
+        self.aim_details = QLabel("Aim: pulsa Iniciar para ver el diagnóstico.", objectName="hint")
+        self.aim_details.setWordWrap(True)
+        column.addWidget(self.aim_details)
         self.capture_banner = QFrame(objectName="captureBanner")
         notice = QVBoxLayout(self.capture_banner)
         self.capture_help = QLabel(PERMISSION_HELP)
@@ -409,11 +441,24 @@ class MainWindow(QMainWindow):
         parent.addWidget(frame)
         return box
 
+    def _help_badge(self, row, attr):
+        if attr not in AIM_HELP:
+            return
+        help_label = QLabel("?", objectName="helpBadge")
+        help_label.setProperty("setting", attr)
+        help_label.setFixedSize(18, 18)
+        help_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        help_label.setCursor(Qt.CursorShape.WhatsThisCursor)
+        help_label.setToolTip("<qt>" + AIM_HELP[attr] + "</qt>")
+        help_label.setAccessibleName("Ayuda: " + attr.removeprefix("aim_"))
+        row.addWidget(help_label)
+
     def _slider(self, card, label, attr, low, high, scale=1, suffix="", percent=False, step=1):
         """Deslizador con etiqueta y valor. `scale` convierte enteros del
         deslizador en decimales (p. ej. 45 -> 0.45 con scale=100)."""
         top = QHBoxLayout()
         top.addWidget(QLabel(label, objectName="fieldLabel"), 1)
+        self._help_badge(top, attr)
         value_label = QLabel(objectName="value")
         top.addWidget(value_label)
         card.addLayout(top)
@@ -457,7 +502,13 @@ class MainWindow(QMainWindow):
 
         box.toggled.connect(on_change)
         self._binders.append(bind)
-        card.addWidget(box)
+        if attr in AIM_HELP:
+            row = QHBoxLayout()
+            row.addWidget(box, 1)
+            self._help_badge(row, attr)
+            card.addLayout(row)
+        else:
+            card.addWidget(box)
         return box
 
     def _spin(self, card, label, attr, low, high):
@@ -500,7 +551,13 @@ class MainWindow(QMainWindow):
 
         combo.currentIndexChanged.connect(on_change)
         self._binders.append(bind)
-        card.addWidget(combo)
+        if attr in AIM_HELP:
+            row = QHBoxLayout()
+            row.addWidget(combo, 1)
+            self._help_badge(row, attr)
+            card.addLayout(row)
+        else:
+            card.addWidget(combo)
         return combo
 
     # ==================================================================
@@ -662,12 +719,77 @@ class MainWindow(QMainWindow):
                    and not self.worker.aim.status.startswith("PARADA"))
         self.desktop_overlay.configure(self._screen_bounds, options(self.settings)["fov"], visible)
 
+    def _apply_aim_defaults(self) -> None:
+        self._cancel_mouse_probe()
+        defaults = Settings().to_dict()
+        for key, value in defaults.items():
+            if key.startswith("aim_"):
+                setattr(self.settings, key, value)
+        self._sync_controls()
+        self._changed()
+        self.aim_status.setText("AIM  /  Configuración inicial cargada · habilita Aim cuando estés listo")
+
+    def _request_input_permissions(self) -> None:
+        try:
+            from ..macos_input import QuartzInput
+            backend = QuartzInput()
+            backend.request_permissions()
+            self.aim_details.setText(backend.permission_message() +
+                ". Si acabas de concederlos, cierra y vuelve a abrir Oculo desde Aplicaciones.")
+        except Exception as exc:
+            self.aim_details.setText(str(exc))
+
+    def _start_mouse_probe(self) -> None:
+        try:
+            from ..macos_input import QuartzInput
+            backend = QuartzInput()
+            if not backend.ready():
+                self.aim_details.setText(backend.permission_message())
+                return
+            self.settings.aim_enabled = False
+            self._sync_controls()
+            self._changed()
+            self._mouse_probe = MovementProbe(backend, self.settings.aim_emergency)
+            self.probe_button.setEnabled(False)
+            self._probe_timer.start()
+            self._poll_mouse_probe()
+        except Exception as exc:
+            self.aim_details.setText(str(exc))
+
+    def _cancel_mouse_probe(self) -> None:
+        if self._mouse_probe is not None:
+            self.aim_details.setText(self._mouse_probe.cancel())
+            self._mouse_probe = None
+            self._probe_timer.stop()
+            self.probe_button.setEnabled(True)
+
+    def _poll_mouse_probe(self) -> None:
+        if self._mouse_probe is None:
+            return
+        try:
+            self.aim_details.setText(self._mouse_probe.tick())
+        except Exception as exc:
+            self._mouse_probe.cancel()
+            self.aim_details.setText(f"Prueba detenida: {exc}")
+        if self._mouse_probe.done:
+            self._probe_timer.stop()
+            self.probe_button.setEnabled(True)
+            self._mouse_probe = None
+
     def _refresh_aim_status(self) -> None:
         if self.worker:
             self.aim_status.setText("AIM  /  " + self.worker.aim.status)
+            if self._mouse_probe is None and self.settings.aim_enabled:
+                d = self.worker.aim.diagnostics
+                age = "—" if d["age_ms"] is None else f'{d["age_ms"]:.0f} ms'
+                self.aim_details.setText(
+                    f'Tecla: {"detectada" if d["activation"] else "sin pulsar"} · '
+                    f'Dentro del FOV: {d["in_fov"]} · Imagen: {age} · '
+                    f'Descartadas por retraso: {d["stale"]} · Envíos al ratón: {d["posted"]}')
         self._sync_desktop_overlay()
 
     def emergency_stop(self) -> None:
+        self._cancel_mouse_probe()
         if self.worker:
             self.worker.aim.panic()
         self.settings.aim_enabled = False
@@ -683,6 +805,7 @@ class MainWindow(QMainWindow):
             self._screen_bounds = None
 
     def stop(self) -> None:
+        self._cancel_mouse_probe()
         self.desktop_overlay.hide()
         self._screen_bounds = None
         if self.worker:
@@ -750,6 +873,8 @@ class MainWindow(QMainWindow):
 
     def closeEvent(self, event) -> None:  # noqa: N802 - nombre impuesto por Qt
         """Al cerrar la ventana: parar el hilo y guardar los ajustes."""
+        self._cancel_mouse_probe()
+        self._probe_timer.stop()
         self._aim_timer.stop()
         self._capture_timer.stop()
         self.desktop_overlay.close()
