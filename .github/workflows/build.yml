@@ -17,7 +17,7 @@ permissions:
 
 jobs:
   build:
-    runs-on: macos-14   # runner Apple Silicon (arm64)
+    runs-on: macos-latest   # runner Apple Silicon (arm64)
     steps:
       - uses: actions/checkout@v4
 
