@@ -1,0 +1,11 @@
+__pycache__/
+*.pyc
+.pytest_cache/
+.venv/
+build/
+dist/
+logs/
+settings.json
+# Los modelos son tuyos y pueden pesar mucho: no se suben al repo.
+models/*.onnx
+.DS_Store

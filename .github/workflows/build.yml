@@ -1,0 +1,70 @@
+# Construye Oculo.app y lo empaqueta en un .dmg.
+#
+# Se ejecuta:
+#   - en cada push a main            -> el .dmg queda como "artifact" del workflow
+#   - al crear un tag v* (v1.0.0...) -> además se publica una Release con el .dmg
+#   - a mano desde la pestaña Actions (workflow_dispatch)
+name: Build macOS
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write   # necesario para crear la Release
+
+jobs:
+  build:
+    runs-on: macos-14   # runner Apple Silicon (arm64)
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Instalar dependencias
+        run: pip install -r requirements-dev.txt
+
+      - name: Tests
+        run: python -m pytest -q
+
+      - name: Generar icono (.icns)
+        run: |
+          python scripts/make_icon.py
+          iconutil -c icns build/Oculo.iconset -o build/Oculo.icns
+
+      - name: Construir Oculo.app
+        run: pyinstaller Oculo.spec --noconfirm
+
+      - name: Comprobar que la app arranca
+        # Arranca la app sin pantalla 5 s; si peta al importar algo, falla aquí
+        # y no en tu Mac.
+        run: |
+          QT_QPA_PLATFORM=offscreen dist/Oculo.app/Contents/MacOS/Oculo &
+          PID=$!
+          sleep 5
+          kill -0 $PID   # sigue viva = arrancó bien
+          kill $PID
+
+      - name: Crear .dmg
+        run: |
+          mkdir -p dist/dmg
+          cp -R dist/Oculo.app dist/dmg/
+          ln -s /Applications dist/dmg/Applications
+          hdiutil create -volname "Oculo" -srcfolder dist/dmg -ov -format UDZO dist/Oculo.dmg
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Oculo-dmg
+          path: dist/Oculo.dmg
+
+      - name: Publicar Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/Oculo.dmg
+          generate_release_notes: true
