@@ -17,7 +17,7 @@ import time
 from pathlib import Path
 
 from PySide6.QtCore import QSize, Qt, QTimer, QUrl
-from PySide6.QtGui import QColor, QDesktopServices, QIcon, QImage, QPixmap
+from PySide6.QtGui import QColor, QDesktopServices, QIcon, QImage, QKeySequence, QPixmap, QShortcut
 from PySide6.QtWidgets import (
     QAbstractItemView, QCheckBox, QColorDialog, QComboBox, QFileDialog, QFrame,
     QGridLayout, QHBoxLayout, QHeaderView, QLabel, QLineEdit, QMainWindow,
@@ -105,11 +105,15 @@ class MainWindow(QMainWindow):
         self.refresh_models()
         self._sync_controls()
 
+        # Atajos del modo cine: F entra/sale, Esc sale.
+        QShortcut(QKeySequence("F"), self, activated=self.toggle_cinema)
+        QShortcut(QKeySequence(Qt.Key.Key_Escape), self, activated=lambda: self.toggle_cinema(False))
+
     # ==================================================================
     # Construcción de la interfaz
     # ==================================================================
     def _build_header(self) -> QWidget:
-        header = QWidget(objectName="header")
+        header = self.header = QWidget(objectName="header")
         header.setFixedHeight(64)
         row = QHBoxLayout(header)
         row.setContentsMargins(20, 0, 20, 0)
@@ -131,6 +135,7 @@ class MainWindow(QMainWindow):
         row.addStretch()
 
         for text, slot in (
+            ("Pantalla completa (F)", lambda: self.toggle_cinema()),
             ("Carpeta de modelos", lambda: self._open_folder(models_dir())),
             ("Cargar preset", self.load_preset),
             ("Guardar preset", self.save_preset),
@@ -238,7 +243,7 @@ class MainWindow(QMainWindow):
 
         column.addStretch()
 
-        scroll = QScrollArea(objectName="sidebar")
+        scroll = self.sidebar = QScrollArea(objectName="sidebar")
         scroll.setWidget(body)
         scroll.setWidgetResizable(True)
         scroll.setFixedWidth(348)
@@ -247,12 +252,14 @@ class MainWindow(QMainWindow):
 
     def _build_main(self) -> QWidget:
         main = QWidget()
-        column = QVBoxLayout(main)
+        column = self.main_column = QVBoxLayout(main)
         column.setContentsMargins(18, 16, 18, 14)
         column.setSpacing(12)
 
-        # Fila de estadísticas
-        chips = QHBoxLayout()
+        # Fila de estadísticas (dentro de un widget para poder ocultarla entera)
+        self.chips_row = QWidget()
+        chips = QHBoxLayout(self.chips_row)
+        chips.setContentsMargins(0, 0, 0, 0)
         chips.setSpacing(10)
         self.stat_labels: dict[str, QLabel] = {}
         for key, name in (("fps", "FPS"), ("infer", "INFERENCIA"), ("count", "DETECCIONES"),
@@ -266,7 +273,7 @@ class MainWindow(QMainWindow):
             box.addWidget(value)
             self.stat_labels[key] = value
             chips.addWidget(chip, 1)
-        column.addLayout(chips)
+        column.addWidget(self.chips_row)
 
         self.viewer = Viewer()
         column.addWidget(self.viewer, 1)
@@ -483,6 +490,25 @@ class MainWindow(QMainWindow):
             self.refresh_models()
             self._sync_controls()
             self._set_status(f"Preset cargado: {Path(path).name}")
+
+    def toggle_cinema(self, enable: bool | None = None) -> None:
+        """Modo cine: el visor ocupa toda la pantalla y se oculta lo demás.
+
+        Pensado para revisar un vídeo (fuente «Archivo de vídeo») a pantalla
+        completa con las detecciones dibujadas encima.
+        """
+        active = self.isFullScreen()
+        enable = (not active) if enable is None else enable
+        if enable == active:
+            return
+        for widget in (self.header, self.sidebar, self.chips_row, self.table, self.status):
+            widget.setVisible(not enable)
+        margin = 0 if enable else 18
+        self.main_column.setContentsMargins(margin, 0 if enable else 16, margin, 0 if enable else 14)
+        if enable:
+            self.showFullScreen()
+        else:
+            self.showNormal()
 
     # ------------------------------------------------------------------
     def toggle_running(self) -> None:

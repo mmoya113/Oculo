@@ -70,10 +70,10 @@ def list_models() -> list[str]:
 @dataclass
 class Settings:
     # --- Modelo ---
-    model: str = ""                 # nombre del archivo dentro de models/
-    confidence: float = 0.45        # descarta detecciones por debajo de esto
-    iou: float = 0.50               # umbral de solape para la NMS (ver inference.py)
-    max_detections: int = 50        # tope de cajas por imagen
+    model: str = "best_PfYipLn.onnx"  # nombre del archivo dentro de models/
+    confidence: float = 0.11        # descarta detecciones por debajo de esto
+    iou: float = 0.10               # umbral de solape para la NMS (ver inference.py)
+    max_detections: int = 200       # tope de cajas por imagen
     classes: list[int] = field(default_factory=list)  # vacío = todas las clases
 
     # --- Fuente de imagen ---
@@ -82,7 +82,7 @@ class Settings:
     video_path: str = ""
     video_loop: bool = True
     camera_index: int = 0
-    fps_limit: int = 60             # 0 = sin límite
+    fps_limit: int = 83             # 0 = sin límite
 
     # --- Zona de detección ---
     # En vez de analizar la imagen entera se recorta un rectángulo centrado.

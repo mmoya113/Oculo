@@ -14,6 +14,7 @@ Oculo **solo observa**: captura, detecta, dibuja y registra. No envía ningún e
 | **Visor** | Color de caja, un color por clase, estilo (esquinas o caja completa), grosor, etiquetas, confianza, punto central, coordenadas, estadísticas |
 | **Datos** | Tabla en vivo con centro y tamaño de cada caja, y registro en CSV |
 | **Presets** | Guardar y cargar toda la configuración como JSON |
+| **Pantalla completa** | Tecla `F` (o el botón de la cabecera): el visor ocupa toda la pantalla. `Esc` para salir |
 
 ## Instalación (app)
 
