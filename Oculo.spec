@@ -41,7 +41,7 @@ app = BUNDLE(
         "CFBundleDisplayName": "Oculo",
         "CFBundleShortVersionString": __version__,
         "NSHighResolutionCapable": True,
-        "LSMinimumSystemVersion": "12.0",
+        "LSMinimumSystemVersion": "14.0",
         # Texto que macOS enseña al pedir permiso de cámara (fuente "Webcam").
         "NSCameraUsageDescription": "Oculo usa la cámara como fuente de imagen para la detección.",
     },

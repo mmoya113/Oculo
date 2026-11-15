@@ -93,6 +93,28 @@ class Settings:
     zone_offset_x: int = 0          # desplazamiento respecto al centro
     zone_offset_y: int = 0
 
+    # --- Aim (distancias en puntos lógicos macOS, no píxeles Retina) ---
+    aim_enabled: bool = False
+    aim_activation: str = "mouse:right"
+    aim_emergency: str = "key:f8"
+    aim_mode: str = "exponential"
+    aim_fov: float = 180.0            # radio desde la mira real del monitor
+    aim_sticky: bool = True
+    aim_match_radius: float = 80.0
+    aim_lost_ms: int = 120            # retener identidad; nunca mover sin detección
+    aim_point_y: float = 0.5          # 0 = parte superior, 1 = inferior
+    aim_response_ms: float = 160.0
+    aim_ema: float = 0.65             # peso de la medición nueva a 60 Hz
+    aim_prediction_ms: float = 0.0    # apagada por defecto (cámara no observable)
+    aim_prediction_limit: float = 8.0
+    aim_deadzone: float = 2.0
+    aim_max_step: float = 12.0
+    aim_max_speed: float = 600.0      # puntos por segundo
+    aim_gain_x: float = 1.0           # calibración entrada -> desplazamiento visual
+    aim_gain_y: float = 1.0
+    aim_stale_ms: int = 100
+    aim_show_fov: bool = True
+
     # --- Visor ---
     box_color: str = "#8B7CFF"
     box_thickness: int = 2

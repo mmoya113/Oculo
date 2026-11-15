@@ -5,14 +5,14 @@ que cambiar el aspecto de la app sea cuestión de tocar unas pocas líneas.
 """
 
 # Paleta
-BG = "#0B0B10"          # fondo de la ventana
-SURFACE = "#13131B"     # panel lateral
-CARD = "#191923"        # tarjetas de ajustes
-BORDER = "#262633"
+BG = "#0B1016"          # fondo de la ventana
+SURFACE = "#101720"     # panel lateral
+CARD = "#161F2A"        # tarjetas de ajustes
+BORDER = "#263442"
 TEXT = "#EDEDF4"
 MUTED = "#8C8CA1"
-ACCENT = "#8B7CFF"      # violeta
-ACCENT_2 = "#4CC9F0"    # cian
+ACCENT = "#54DCC0"      # violeta
+ACCENT_2 = "#8AABFF"    # cian
 DANGER = "#FF6B8B"
 OK = "#3DDC97"
 
@@ -47,10 +47,10 @@ QPushButton {{
 QPushButton:hover {{ border-color: {ACCENT}; }}
 QPushButton:pressed {{ background: {BORDER}; }}
 QPushButton#primary {{
-    background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 {ACCENT}, stop:1 #6C5CE7);
+    background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 {ACCENT}, stop:1 #278C80);
     border: none; color: white; padding: 9px 22px; font-size: 13px; border-radius: 9px;
 }}
-QPushButton#primary:hover {{ background: #9D90FF; }}
+QPushButton#primary:hover {{ background: #79E8D0; }}
 QPushButton#primary[running="true"] {{ background: {DANGER}; }}
 
 /* ---------- Desplegables y campos ---------- */
@@ -89,7 +89,7 @@ QCheckBox::indicator:checked {{ background: {ACCENT}; border-color: {ACCENT}; }}
 /* ---------- Visor y datos ---------- */
 QLabel#viewer {{ background: #07070B; border: 1px solid {BORDER}; border-radius: 14px; color: {MUTED}; }}
 QFrame#statChip {{ background: {CARD}; border: 1px solid {BORDER}; border-radius: 10px; }}
-QLabel#statValue {{ font-family: {MONO_FAMILY}; font-size: 15px; font-weight: 600; }}
+QLabel#statValue {{ font-family: {MONO_FAMILY}; font-size: 20px; font-weight: 600; }}
 QLabel#statName {{ color: {MUTED}; font-size: 10px; letter-spacing: 1.2px; font-weight: 700; }}
 QTableWidget {{
     background: {CARD}; border: 1px solid {BORDER}; border-radius: 12px;
@@ -109,4 +109,16 @@ QScrollBar:vertical {{ background: transparent; width: 10px; margin: 2px; }}
 QScrollBar::handle:vertical {{ background: #2E2E3D; border-radius: 4px; min-height: 30px; }}
 QScrollBar::add-line, QScrollBar::sub-line {{ height: 0; }}
 QScrollBar::add-page, QScrollBar::sub-page {{ background: transparent; }}
+"""
+
+STYLESHEET += f"""
+QTabWidget::pane {{ border: none; background: {SURFACE}; }}
+QTabBar::tab {{ background: {SURFACE}; color: {MUTED}; padding: 10px 13px;
+    border-bottom: 2px solid {BORDER}; font-weight: 600; }}
+QTabBar::tab:selected {{ color: {ACCENT}; border-color: {ACCENT}; }}
+QLabel#sectionTitle {{ color: {TEXT}; font-size: 11px; font-weight: 700; padding: 0 2px 7px; }}
+QLabel#aimStatus {{ background: #122B2B; color: {ACCENT}; padding: 12px 16px;
+    border: 1px solid #254542; border-radius: 10px; font-size: 12px; }}
+QPushButton#danger {{ color: {DANGER}; border-color: #633344; }}
+QToolTip {{ background: {CARD}; color: {TEXT}; border: 1px solid {BORDER}; }}
 """

@@ -51,6 +51,7 @@ def render(
     detections: list[Detection],
     s: Settings,
     stats_text: str = "",
+    geometry=None,
 ) -> QImage:
     """Devuelve la imagen con cajas, etiquetas, centros y estadísticas."""
     image = to_qimage(frame)
@@ -64,6 +65,17 @@ def render(
     font.setWeight(QFont.Weight.DemiBold)
     p.setFont(font)
     metrics = p.fontMetrics()
+
+    if s.aim_enabled and s.aim_show_fov and geometry is not None:
+        from .aim import options
+        cx, cy = geometry.local_crosshair
+        p.setPen(QPen(QColor("#54DCC0"), 1))
+        p.setBrush(Qt.BrushStyle.NoBrush)
+        radius = options(s)["fov"]
+        p.drawEllipse(QPointF(cx, cy), radius*geometry.pixel_width/geometry.width,
+                      radius*geometry.pixel_height/geometry.height)
+        p.drawLine(QPointF(cx-7, cy), QPointF(cx+7, cy))
+        p.drawLine(QPointF(cx, cy-7), QPointF(cx, cy+7))
 
     for d in detections:
         color = QColor(
