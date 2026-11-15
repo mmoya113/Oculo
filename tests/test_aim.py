@@ -201,3 +201,29 @@ def test_identical_or_unknown_binding_rejected():
     r.configure(s)
     with pytest.raises(ValueError):
         r.tick()
+
+
+def test_inflight_frame_from_old_settings_is_rejected():
+    r,b,s,t = runtime()
+    b.keys.add("mouse:right")
+    r.tick()
+    old = s.copy()
+    s.zone_offset_x = 20
+    r.configure(s)
+    r.tick()
+    r.submit([box(60)], (0,0), t[0], "old", old)
+    r.tick()
+    assert not b.moves
+    r.submit([box(60)], (0,0), t[0], "new", s)
+    r.tick()
+    assert len(b.moves) == 1
+
+
+def test_macos_adapter_loads_without_prompt_or_posting():
+    import sys
+    if sys.platform != "darwin":
+        pytest.skip("Quartz is macOS only")
+    from oculo.macos_input import QuartzInput
+    backend = QuartzInput()
+    assert isinstance(backend.ready(), bool)
+    assert backend.pressed("key:unknown") is False

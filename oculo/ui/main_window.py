@@ -177,13 +177,17 @@ class MainWindow(QMainWindow):
             tabs.addTab(widget, title)
             return layout
 
+        mouse_names = {"right": "Clic derecho", "left": "Clic izquierdo",
+                       "middle": "Botón central", "4": "Botón lateral 4", "5": "Botón lateral 5"}
+        binding_options = [(mouse_names[b.split(":")[1]] if b.startswith("mouse:")
+                            else "Tecla " + b.split(":")[1].upper(), b) for b in BINDINGS]
         column = page("Aim")
         card = self._card(column, "01  /  ACTIVACIÓN")
         self._check(card, "Habilitar Aim assist", "aim_enabled")
         card.addWidget(QLabel("Mantener para activar", objectName="fieldLabel"))
-        self._combo(card, "aim_activation", [(b, b) for b in BINDINGS])
+        self._combo(card, "aim_activation", binding_options)
         card.addWidget(QLabel("Parada global (requiere rearmar)", objectName="fieldLabel"))
-        self._combo(card, "aim_emergency", [(b, b) for b in BINDINGS])
+        self._combo(card, "aim_emergency", binding_options)
         hint = QLabel("Predeterminado: clic derecho · parada F8.\n"
                       "Activa Accesibilidad y Monitorización de entrada en macOS. "
                       "Teclas por posición física US; usa Fn si tu Mac lo requiere.", objectName="hint")
