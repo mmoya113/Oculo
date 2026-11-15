@@ -38,10 +38,12 @@ class MovementProbe:
         if now-self.sent_at < .15:
             return "Comprobando el movimiento del cursor"
         self.done = True
+        if not getattr(self.backend, "moves_cursor", True):
+            return "Ruta relativa enviada · la posición del cursor no valida esta entrada; usa la prueba de GeForce NOW"
         after = self.backend.position()
         dx, dy = after[0]-self.before[0], after[1]-self.before[1]
         if abs(dx-12) <= 3 and abs(dy) <= 3:
             return "Prueba correcta · macOS movió el cursor. Activa Aim para probar la detección."
         if math.hypot(dx,dy) < 1:
-            return "No se observó movimiento · coloca el cursor lejos del borde; si Accesibilidad ya está activada, elimina la entrada antigua con − y vuelve a añadir la app instalada"
+            return "No se observó movimiento con esta entrada · evita el borde y prueba Entrada 1. Si Entrada 1 ya funciona, prueba otro método de entrada; cambiar permisos no confirma la aceptación de GeForce NOW"
         return "Prueba no concluyente · deja el ratón quieto y repite"

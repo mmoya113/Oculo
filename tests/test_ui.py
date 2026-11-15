@@ -159,3 +159,21 @@ def test_saved_overlay_always_starts_hidden_and_fov_limit_defaults_off(monkeypat
     assert window.settings.aim_limit_fov is False
     assert not window.desktop_overlay.isVisible()
     window.close()
+
+
+def test_user_confirmed_gfn_result_is_attached_to_the_tested_input_method(monkeypatch):
+    app=QApplication.instance() or QApplication([])
+    monkeypatch.setattr(Settings,"load",classmethod(lambda cls:cls()))
+    monkeypatch.setattr(Settings,"save",lambda self:None)
+    monkeypatch.setattr("oculo.ui.main_window.screen_capture_allowed",lambda **kw:True)
+    window=MainWindow()
+    assert window._pending_input_result is None
+    window._record_input_result(True)
+    assert window.settings.input_test_results=={}
+    window._pending_input_result="relative_session"
+    window.settings.aim_input_method="relative_session"
+    window._record_input_result(False)
+    assert window.settings.input_test_results=={"relative_session":"ignored"}
+    assert "sin respuesta" in window.input_result_label.text()
+    assert not window.input_yes_button.isEnabled()
+    window.close()

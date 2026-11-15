@@ -13,5 +13,5 @@ Mapa rápido de módulos (léelos en este orden para entender el flujo):
 El control del ratón es opcional y requiere activación explícita y permisos.
 """
 
-__version__ = "1.0.3"
+__version__ = "1.0.4"
 APP_NAME = "Oculo"

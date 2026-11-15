@@ -10,6 +10,7 @@ AIM_HELP = {
     "aim_lost_ms": "Tiempo que recuerda un objetivo desaparecido antes de elegir otro. Durante esa espera no mueve el ratón. Empieza con 120 milisegundos.",
     "aim_point_y": "Altura dentro de la caja a la que se apunta: 0 es el borde superior, 0,5 el centro y 1 el borde inferior. Empieza con 0,5; el significado de la caja depende de tu modelo.",
     "aim_show_fov": "Dibuja el círculo y la mira sobre el monitor capturado. Es solo una ayuda visual y siempre arranca oculto: no desactiva el Aim ni limita la selección de objetivos.",
+    "aim_input_method": "Cambia cómo se envía el ratón, independientemente del suavizado. 1: cursor y delta por la entrada de sistema; 2: por la sesión; 3: solo delta manteniendo la posición; 4: delta de sesión. Son cuatro rutas públicas de Quartz, no un ratón físico. Prueba 3, 4 y 2 en GeForce NOW; ninguna está garantizada. La 1 conserva el comportamiento de escritorio que ya funciona.",
     "aim_mode": "Exponential es el punto de partida recomendado. Linear aplica una fracción constante; Bezier empieza con pasos más pequeños; Adaptive responde más deprisa lejos de la mira. Cambiar el modo no resuelve permisos o imágenes caducadas.",
     "aim_response_ms": "Cuánto tarda en corregir el error. Un número mayor produce movimientos más lentos y suaves; uno menor responde más deprisa. Empieza con 180 ms. No es un retraso antes de activar.",
     "aim_ema": "Reduce el temblor entre imágenes. Cerca de 1 sigue más la medición nueva; valores bajos suavizan más y añaden retraso. Empieza con 0,65.",

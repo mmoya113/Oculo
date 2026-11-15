@@ -271,3 +271,31 @@ Si el interruptor de Oculo aparece encendido pero macOS no reconoce la copia act
 Las compilaciones actuales usan firma ad hoc. Su requisito de firma puede identificar el hash de cada ejecutable; reemplazar el build puede dejar una entrada visible asociada a una copia anterior. La app no puede concederse permisos, modificar la base de permisos ni garantizar que macOS conserve la autorización al actualizar. Una identidad Developer ID estable requiere un certificado del propietario, no incluido en este repositorio.
 
 Las pruebas adicionales cubren objetivos fuera del círculo con límite apagado, captura completa ignorando recortes antiguos, arranque con el círculo oculto y la discrepancia entre AX y el preflight de Quartz. El ensayo nativo construye la solicitud de Accesibilidad sin mostrar avisos ni conceder permisos, e intercepta los eventos antes de publicarlos.
+
+
+## 1.0.4: métodos de entrada y prueba en GeForce NOW nativo
+
+Los modos Linear/Bezier/Exponential/Adaptive siguen definiendo el suavizado. El nuevo selector **Método de entrada del ratón** cambia la ruta real con la que se publica cada paso, independientemente del suavizado:
+
+| Método | Punto de publicación Quartz | Posición incluida en el evento | Delta |
+|---|---|---|---|
+| Entrada 1 · estándar | HID event tap (0) | Cursor actual + paso | X/Y enteros |
+| Entrada 2 · sesión | Session event tap (1) | Cursor actual + paso | X/Y enteros |
+| Entrada 3 · delta relativo | HID event tap (0) | Cursor actual, sin sumar el paso | X/Y enteros |
+| Entrada 4 · delta de sesión | Session event tap (1) | Cursor actual, sin sumar el paso | X/Y enteros |
+
+La Entrada 1 es la opción por defecto y conserva el comportamiento de escritorio. Las cuatro usan APIs públicas de Quartz y una fuente de la sesión actual; **no representan un dispositivo físico ni tienen compatibilidad confirmada con GeForce NOW**. El nombre «HID event tap» identifica un punto del flujo de eventos de macOS, no un ratón USB o un driver. Se permite que el teclado y ratón físicos sigan pasando mientras se publican pasos. Cambiar de entrada descarta el historial de control y reinicia su contador de envíos; conserva el suavizado elegido.
+
+### Probarlo dentro de la app nativa
+
+1. Selecciona **Entrada 3** y deja Exponential como suavizado. Si no responde, prueba **4**, después **2** y **1**.
+2. Pulsa **Probar entrada en GeForce NOW (5 s)**. La prueba desactiva Aim y deja cinco segundos para entrar en la app nativa de GeForce NOW, en un menú o zona de prueba. No requiere detecciones.
+3. Deja el ratón quieto y suelta los botones. Solo cuando el cliente/streamer de GeForce NOW está en primer plano se envían cuatro pasos de 8 puntos: derecha, derecha, izquierda, izquierda, separados por al menos 150 ms. F8 o la parada configurada cancela; perder foco, permisos o pulsar un botón también cancela los pasos restantes. Detener/cerrar Oculo cancela cualquier prueba pendiente.
+4. Vuelve a Oculo y marca **Sí, se movió** o **No se movió** según la respuesta de la cámara. Se guarda tu resultado para esa entrada. El registro es tu observación de esa sesión, no una certificación de compatibilidad; puede cambiar con la versión del cliente, el juego o su configuración.
+5. Conserva la entrada que respondió, habilita Aim y mantén la activación para probar las detecciones.
+
+La prueba de escritorio no interpreta un cursor inmóvil en las entradas relativas como fallo de Accesibilidad. Dentro de un juego con cursor bloqueado, el cursor local puede permanecer en el centro incluso si la cámara recibe un delta. Por eso no se declara éxito en GeForce NOW a partir de la posición del cursor ni de que `CGEventPost` haya retornado: hace falta observar la cámara y registrar el resultado.
+
+Si las cuatro rutas son ignoradas por el cliente, estas APIs no aportan una compatibilidad comprobada y la app lo deja registrado. No se modifican archivos, opciones ocultas ni protecciones de GeForce NOW; no se instalan drivers ni dispositivos virtuales. El estado actual es **cuatro rutas experimentales implementadas**, pendientes de validación en la sesión del usuario.
+
+Referencias primarias: [puntos de publicación de eventos de Apple](https://developer.apple.com/documentation/coregraphics/cgeventtaplocation), [API de eventos Quartz](https://developer.apple.com/documentation/coregraphics/quartz-event-services), [supresión de eventos de una fuente](https://developer.apple.com/documentation/coregraphics/cgeventsourcesetlocaleventssuppressioninterval).

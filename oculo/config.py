@@ -98,6 +98,8 @@ class Settings:
     aim_activation: str = "mouse:right"
     aim_emergency: str = "key:f8"
     aim_mode: str = "exponential"
+    aim_input_method: str = "quartz_hid"
+    input_test_results: dict[str, str] = field(default_factory=dict)
     aim_limit_fov: bool = False      # apagado = buscar en todo el monitor
     aim_fov: float = 180.0            # radio desde la mira real del monitor
     aim_sticky: bool = True
@@ -143,7 +145,15 @@ class Settings:
         lo que no exista se queda con su valor por defecto.
         """
         valid = {f.name for f in fields(cls)}
-        return cls(**{k: v for k, v in data.items() if k in valid})
+        values = {k: v for k, v in data.items() if k in valid}
+        from .macos_input import INPUT_METHODS
+        method = values.get("aim_input_method", "quartz_hid")
+        if not isinstance(method, str) or method not in INPUT_METHODS:
+            values["aim_input_method"] = "quartz_hid"
+        results = values.get("input_test_results", {})
+        values["input_test_results"] = ({k:v for k,v in results.items()
+            if k in INPUT_METHODS and v in ("accepted", "ignored")} if isinstance(results, dict) else {})
+        return cls(**values)
 
     def save(self, path: Path | None = None) -> None:
         target = path or settings_path()

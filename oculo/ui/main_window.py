@@ -29,7 +29,7 @@ from PySide6.QtWidgets import (
 from .. import APP_NAME, __version__
 from ..config import Settings, list_models, logs_dir, models_dir
 from ..worker import DetectionWorker
-from ..macos_input import BINDINGS
+from ..macos_input import BINDINGS, INPUT_METHODS
 from . import theme
 from .branding import logo_pixmap
 from .titlebar import DraggableHeader
@@ -38,6 +38,7 @@ from .desktop_overlay import DesktopOverlay
 from ..aim import options
 from .aim_help import AIM_HELP
 from ..input_probe import MovementProbe
+from ..gfn_probe import GFNMovementProbe
 
 
 class Viewer(QLabel):
@@ -84,6 +85,7 @@ class MainWindow(QMainWindow):
         self.desktop_overlay = DesktopOverlay()
         self._screen_bounds = None
         self._mouse_probe = None
+        self._pending_input_result = None
         self._show_permission_report = False
         self._binders: list = []          # funciones ajustes -> control
         self._last_table_update = 0.0
@@ -220,6 +222,24 @@ class MainWindow(QMainWindow):
         self.probe_button.setToolTip("Desactiva Aim y, tras 3 segundos, mueve el cursor 12 puntos a la derecha una sola vez. No necesita modelo ni detecciones. Suelta los botones y deja el ratón quieto, lejos del borde. F8 o tu parada configurada cancela la prueba.")
         self.probe_button.clicked.connect(self._start_mouse_probe)
         card.addWidget(self.probe_button)
+        card.addWidget(QLabel("Método de entrada del ratón", objectName="fieldLabel"))
+        self._combo(card, "aim_input_method", [(method.label, key) for key, method in INPUT_METHODS.items()])
+        self.input_result_label = QLabel("Entrada sin probar en GeForce NOW.", objectName="hint")
+        self.input_result_label.setWordWrap(True)
+        card.addWidget(self.input_result_label)
+        self.gfn_probe_button = QPushButton("Probar entrada en GeForce NOW (5 s)")
+        self.gfn_probe_button.setToolTip("Desactiva Aim y da 5 segundos para entrar en la app nativa de GeForce NOW, en un menú o zona de prueba. Envía cuatro pasos pequeños derecha/izquierda con el método seleccionado. Suelta botones. F8 cancela. Después indica si la cámara respondió; Oculo no puede confirmarlo mirando el cursor.")
+        self.gfn_probe_button.clicked.connect(self._start_gfn_probe)
+        card.addWidget(self.gfn_probe_button)
+        feedback = QHBoxLayout()
+        self.input_yes_button = QPushButton("Sí, se movió")
+        self.input_no_button = QPushButton("No se movió")
+        self.input_yes_button.clicked.connect(lambda: self._record_input_result(True))
+        self.input_no_button.clicked.connect(lambda: self._record_input_result(False))
+        for button in (self.input_yes_button, self.input_no_button):
+            button.setEnabled(False)
+            feedback.addWidget(button)
+        card.addLayout(feedback)
         links = QLabel('<a style="color:#54DCC0" href="x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility">Accesibilidad</a> · '
                        '<a style="color:#54DCC0" href="x-apple.systempreferences:com.apple.preference.security?Privacy_ListenEvent">Monitorización de entrada</a>')
         links.setOpenExternalLinks(True)
@@ -248,6 +268,7 @@ class MainWindow(QMainWindow):
         self._slider(card, "Punto vertical (0 arriba / 1 abajo)", "aim_point_y", 0, 100, scale=100)
         self._check(card, "Mostrar FOV y mira sobre otras apps", "aim_show_fov")
         card = self._card(column, "03  /  MOVIMIENTO")
+        card.addWidget(QLabel("Suavizado del apuntado", objectName="fieldLabel"))
         self._combo(card, "aim_mode", [(m, m.lower()) for m in
                                      ("Linear", "Bezier", "Exponential", "Adaptive")])
         self._slider(card, "Respuesta (ms; más = más lento)", "aim_response_ms", 20, 1000)
@@ -577,6 +598,7 @@ class MainWindow(QMainWindow):
     # ==================================================================
     def _changed(self) -> None:
         """Un ajuste ha cambiado: avisar al worker y programar el guardado."""
+        self._refresh_input_result()
         if self.worker:
             self.worker.update_settings(self.settings)
         self._save_timer.start()
@@ -746,7 +768,7 @@ class MainWindow(QMainWindow):
         self._show_permission_report = True
         try:
             from ..macos_input import QuartzInput
-            backend = QuartzInput()
+            backend = QuartzInput(self.settings.aim_input_method)
             backend.request_permissions()
             self.aim_details.setText(backend.permission_report())
         except Exception as exc:
@@ -756,14 +778,18 @@ class MainWindow(QMainWindow):
         self._show_permission_report = True
         try:
             from ..macos_input import QuartzInput
-            self.aim_details.setText(QuartzInput().permission_report())
+            self.aim_details.setText(QuartzInput(self.settings.aim_input_method).permission_report())
         except Exception as exc:
             self.aim_details.setText(str(exc))
 
     def _start_mouse_probe(self) -> None:
+        self._cancel_mouse_probe()
+        self._pending_input_result = None
+        self.input_yes_button.setEnabled(False)
+        self.input_no_button.setEnabled(False)
         try:
             from ..macos_input import QuartzInput
-            backend = QuartzInput()
+            backend = QuartzInput(self.settings.aim_input_method)
             if not backend.ready():
                 self.aim_details.setText(backend.permission_report())
                 return
@@ -772,6 +798,48 @@ class MainWindow(QMainWindow):
             self._changed()
             self._mouse_probe = MovementProbe(backend, self.settings.aim_emergency)
             self.probe_button.setEnabled(False)
+            self.gfn_probe_button.setEnabled(False)
+            self._probe_timer.start()
+            self._poll_mouse_probe()
+        except Exception as exc:
+            self.aim_details.setText(str(exc))
+
+    def _refresh_input_result(self) -> None:
+        result = self.settings.input_test_results.get(self.settings.aim_input_method)
+        text = {"accepted": "Según tu prueba: la cámara respondió en GeForce NOW.",
+                "ignored": "Según tu prueba: sin respuesta en GeForce NOW; prueba otra entrada."}
+        self.input_result_label.setText(text.get(result, "Entrada sin probar en GeForce NOW."))
+
+    def _record_input_result(self, accepted) -> None:
+        if self._pending_input_result is None:
+            return
+        method = self._pending_input_result
+        self.settings.input_test_results[method] = "accepted" if accepted else "ignored"
+        self._pending_input_result = None
+        self.input_yes_button.setEnabled(False)
+        self.input_no_button.setEnabled(False)
+        self._changed()
+        self.aim_details.setText(INPUT_METHODS[method].label +
+            (": respuesta confirmada por tu prueba." if accepted else
+             ": sin respuesta según tu prueba. Prueba la siguiente entrada."))
+
+    def _start_gfn_probe(self) -> None:
+        self._cancel_mouse_probe()
+        self._pending_input_result = None
+        self.input_yes_button.setEnabled(False)
+        self.input_no_button.setEnabled(False)
+        try:
+            from ..macos_input import QuartzInput
+            backend = QuartzInput(self.settings.aim_input_method)
+            if not backend.ready():
+                self.aim_details.setText(backend.permission_report())
+                return
+            self.settings.aim_enabled = False
+            self._sync_controls()
+            self._changed()
+            self._mouse_probe = GFNMovementProbe(backend, self.settings.aim_emergency)
+            self.probe_button.setEnabled(False)
+            self.gfn_probe_button.setEnabled(False)
             self._probe_timer.start()
             self._poll_mouse_probe()
         except Exception as exc:
@@ -783,6 +851,7 @@ class MainWindow(QMainWindow):
             self._mouse_probe = None
             self._probe_timer.stop()
             self.probe_button.setEnabled(True)
+            self.gfn_probe_button.setEnabled(True)
 
     def _poll_mouse_probe(self) -> None:
         if self._mouse_probe is None:
@@ -793,8 +862,13 @@ class MainWindow(QMainWindow):
             self._mouse_probe.cancel()
             self.aim_details.setText(f"Prueba detenida: {exc}")
         if self._mouse_probe.done:
+            if isinstance(self._mouse_probe, GFNMovementProbe) and self._mouse_probe.sent_steps == 4:
+                self._pending_input_result = self._mouse_probe.method
+                self.input_yes_button.setEnabled(True)
+                self.input_no_button.setEnabled(True)
             self._probe_timer.stop()
             self.probe_button.setEnabled(True)
+            self.gfn_probe_button.setEnabled(True)
             self._mouse_probe = None
 
     def _refresh_aim_status(self) -> None:
@@ -806,7 +880,8 @@ class MainWindow(QMainWindow):
                 self.aim_details.setText(
                     f'Tecla: {"detectada" if d["activation"] else "sin pulsar"} · '
                     f'Objetivos válidos: {d["in_fov"]} · Imagen: {age} · '
-                    f'Descartadas por retraso: {d["stale"]} · Envíos al ratón: {d["posted"]}')
+                    f'Descartadas por retraso: {d["stale"]} · Envíos al ratón: {d["posted"]} · '
+                    f'{INPUT_METHODS.get(d["input_method"], INPUT_METHODS["quartz_hid"]).label}')
         self._sync_desktop_overlay()
 
     def emergency_stop(self) -> None:

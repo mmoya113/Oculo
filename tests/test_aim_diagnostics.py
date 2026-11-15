@@ -144,7 +144,10 @@ def test_probe_revoked_permission_cancels():
     assert p.done and not b.moves
 
 
-def test_native_quartz_event_source_fields_without_posting_to_desktop():
+@pytest.mark.parametrize("method,tap,relative", [
+    ("quartz_hid",0,False),("quartz_session",1,False),
+    ("relative_hid",0,True),("relative_session",1,True)])
+def test_native_quartz_event_source_fields_without_posting_to_desktop(method,tap,relative):
     if sys.platform != "darwin":
         pytest.skip("Quartz is macOS only")
     script = """
@@ -170,6 +173,9 @@ b.cg.CGEventPost=capture
 b.move(12,-3)
 assert seen == [(0,112.,197.,12,-3)],seen
 """
+    script=script.replace("b=QuartzInput()", "b=QuartzInput("+repr(method)+")",1)
+    expected=(tap,100. if relative else 112.,200. if relative else 197.,12,-3)
+    script=script.replace("[(0,112.,197.,12,-3)]",repr([expected]))
     result=subprocess.run([sys.executable,"-c",script],capture_output=True,text=True)
     assert result.returncode == 0, result.stderr
 

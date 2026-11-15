@@ -5,7 +5,7 @@ import threading
 import time
 
 from .aim import AimEngine, MotionAccumulator, options, eligible_targets
-from .macos_input import BINDINGS
+from .macos_input import BINDINGS, INPUT_METHODS
 
 
 class AimRuntime:
@@ -24,7 +24,8 @@ class AimRuntime:
         self._status = "Desactivado"
         self._thread = None
         self._info = dict(stage="disabled", activation=False, detections=0, in_fov=0,
-                          samples=0, stale=0, posted=0, age_ms=None, delta=(0,0))
+                          samples=0, stale=0, posted=0, age_ms=None, delta=(0,0),
+                          input_method=settings.aim_input_method)
 
     @property
     def status(self):
@@ -51,6 +52,8 @@ class AimRuntime:
             if settings != self._settings:
                 if not self._settings.aim_enabled and settings.aim_enabled:
                     self._latched = False
+                if settings.aim_input_method != self._settings.aim_input_method:
+                    self._info.update(posted=0, delta=(0,0), input_method=settings.aim_input_method)
                 self._settings = settings.copy()
                 self._latest = None
                 self._reset()
@@ -105,9 +108,14 @@ class AimRuntime:
             if self._backend is None:
                 if self._factory is None:
                     from .macos_input import QuartzInput
-                    self._backend = QuartzInput()
+                    self._backend = QuartzInput(s.aim_input_method)
                 else:
                     self._backend = self._factory()
+            if s.aim_input_method not in INPUT_METHODS:
+                raise ValueError("Elige un método de entrada válido.")
+            if hasattr(self._backend, "set_method"):
+                self._backend.set_method(s.aim_input_method)
+            self._info["input_method"] = s.aim_input_method
             if not self._backend.ready():
                 self._reset()
                 self._active = False
@@ -179,7 +187,7 @@ class AimRuntime:
             if mx or my:
                 self._backend.move(mx, my)
                 self._info["posted"] += 1
-                self._result("posting", f"Enviando movimiento · X {mx:+d}, Y {my:+d}")
+                self._result("posting", f"Enviado por {INPUT_METHODS[s.aim_input_method].label} · X {mx:+d}, Y {my:+d}")
             else:
                 self._result("subpixel", "Objetivo detectado · acumulando un paso pequeño")
 
