@@ -223,7 +223,11 @@ def test_macos_adapter_loads_without_prompt_or_posting():
     import sys
     if sys.platform != "darwin":
         pytest.skip("Quartz is macOS only")
-    from oculo.macos_input import QuartzInput
-    backend = QuartzInput()
-    assert isinstance(backend.ready(), bool)
-    assert backend.pressed("key:unknown") is False
+    import subprocess
+    # Quartz may initialize Apple's main bundle before Qt locates its plugins.
+    # Isolate the native probe; the actual app constructs QApplication first.
+    result = subprocess.run([sys.executable, "-c",
+        "from oculo.macos_input import QuartzInput; b=QuartzInput(); "
+        "assert isinstance(b.ready(), bool); "
+        "assert b.pressed('key:unknown') is False"], capture_output=True, text=True)
+    assert result.returncode == 0, result.stderr
